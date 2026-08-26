@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "GFlTNjKLoVOwiEYEHwQas4RAt6+i3SJB/iOSO+HmlJtXok3nyXglPhFZWPJ2HjKC2z9nGUBRvX5ujYpJtX34TQ==",
+  "success": true,
+  "projectFilePath": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\hp\\.nuget\\packages\\system.codedom\\6.0.0\\system.codedom.6.0.0.nupkg.sha512",
+    "C:\\Users\\hp\\.nuget\\packages\\system.management\\6.0.0\\system.management.6.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}

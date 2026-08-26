@@ -1,0 +1,199 @@
+# PowerDial
+
+A tray app for controlling the power settings that actually affect battery life on this
+laptop (HP OMEN 16-c0xxx, Ryzen 7 5800H + RTX 3050 Ti), with presets, per-setting
+explanations, a live watts readout, and a one-click way back to how things were.
+
+Every value and every cost figure in this app came from measuring **this** machine, not
+from documentation.
+
+## Run it
+
+Double-click **PowerDial** on the Desktop, or run `PowerDial.exe` in this folder.
+
+Closing the window hides it to the notification area. Right-click the tray icon for the
+presets, **Restore original settings**, or **Quit**. Only one instance runs at a time.
+
+## Layout
+
+    control-battery\
+      PowerDial.exe              the app - run this
+      PowerDial.dll             plus the .json files, System.Management.dll, runtimes\
+      README.md                 this file
+      src\PowerDial\            source
+      src\PowerDial-selftest\   read-only checks against the live machine
+      src\PowerDial-uitest\     drives the real window, 30 checks
+
+    Desktop\PowerDial.lnk       shortcut to the exe
+
+Rebuild after editing anything under `src\PowerDial`:
+
+    cd src\PowerDial
+    dotnet publish -c Release -o ..\..
+
+This folder is inside OneDrive, so it syncs. The `bin` and `obj` directories that appear
+under `src` when you build are throwaway - delete them if the sync noise bothers you.
+
+## What it does
+
+**Live readout.** Watts, time left, charge, health, and a sparkline of the recent
+measurement history. HP's firmware never reports an instantaneous power figure — the ACPI
+`DischargeRate` field returns an invalid sentinel — so draw is derived by timing the
+battery's own energy counter over a 60-second window. That means:
+
+- the first reading takes ~60 seconds to appear
+- draw only means anything **on battery**; on AC the panel says so rather than showing a
+  misleading `0.00 W`
+- changing any setting resets the window and clears the trace, so what you see next
+  reflects the new state instead of averaging across the change
+
+**Profiles.** Endurance / Balanced / Full speed. *Balanced* is the configuration that
+actually measured **6.92 W (6h21m)**. All of them write the **on-battery side only** —
+plugged-in behaviour is never touched, which is what kept this safe to experiment with.
+
+**Restore my settings.** Puts back the battery settings as they stood before PowerDial
+existed. The snapshot is taken on first run; since the app writes nothing until you touch
+a control, that first-run state *is* the pre-app state. It lives in
+`%LOCALAPPDATA%\PowerDial\baseline.json`, and if it is ever missing there is a built-in
+fallback: the configuration verified by hand during the tuning session.
+
+Restoring a value that was previously *inherited* rather than stored makes it explicit.
+The behaviour is identical, only the bookkeeping differs, and the activity log says so
+rather than glossing over it.
+
+**Settings, split by whether they matter.** The main list holds the five that change how
+much power you draw while using the machine. Timeouts and lid behaviour — which change
+nothing while you are actually working — are tucked into a collapsed **Basic settings**
+section rather than removed.
+
+**An info icon on every setting and every section**, explaining in plain terms what it
+does, what it costs, and which figures were measured rather than assumed.
+
+**Analytics.** Four views, all built from measurements taken on this machine:
+
+- *Draw over time* - the raw trace. Each point is one 60-second window, with a dashed
+  running average, so you can see what a change actually did.
+- *Runtime by brightness* - the three workloads plotted against the backlight, with a
+  marker where your slider sits and the resulting runtime beside each curve.
+- *Where your watts go* - the current draw split into backlight and everything else.
+- *Battery health* - 43.9 Wh still held against the 70.6 Wh it shipped with, and what the
+  missing capacity costs you in hours at the present draw.
+
+**Discrete GPU watch.** The most useful part. An awake-but-idle RTX 3050 Ti draws **~17 W**
+here while reporting 0% utilisation and 0 MiB allocated — more than the whole rest of the
+system at idle. Three separate things were caught doing it, and none looked expensive in
+Task Manager:
+
+| Culprit | Measured cost |
+|---|---|
+| NVIDIA Instant Replay / overlay | ~11.8 W |
+| OMEN Command Center background | ~11.1 W |
+| OMEN Light Studio background (the RGB engine) | ~12.0 W |
+
+The two OMEN ones relaunch at boot as *packaged background tasks* via `sihost.exe`, so
+disabling their scheduled tasks does nothing. The load-bearing fix is the per-app
+**Background apps permission → Never**, which an OMEN update can silently flip back on.
+Hence the watch: it re-checks the processes, both permissions, and the ShadowPlay flags,
+and totals up the waste.
+
+## Design notes
+
+**Only the DC side is ever written.** No code path touches AC values.
+
+**Reads come from the registry, writes go through `powercfg`.** `powercfg /q` refuses to
+display hidden settings — it returns just a scheme header for the lid action, for example —
+so the app reads
+`HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\...` directly, falling back
+to `DefaultPowerSchemeValues` when a scheme has no stored value. Four of the ten settings
+are ones Windows hides from its own Power Options UI.
+
+**Writes are verified, not assumed.** After every write the value is read back; if it
+disagrees, the activity log says so and shows what it actually reads.
+
+**Elevation is `asInvoker`, deliberately.** Most of what this writes (EPP, brightness)
+succeeds unelevated on this machine, so demanding a UAC prompt at every launch would be
+gratuitous. Anything that does need admin reports it and offers **Run as admin**.
+
+**Nothing is written just by running it.** Verified: launching the app leaves every
+registry value untouched until a control is used.
+
+## Interface
+
+Dark instrument panel rather than a settings dialog. Bahnschrift Condensed — Windows' DIN
+derivative, an engineering face — carries anything numeric; Segoe UI Variable carries the
+prose; Cascadia Mono the log.
+
+Two accents, and both mean something rather than decorate: **amber is energy leaving,
+green is energy kept**, and the readout switches between them based on the actual
+measurement. The signature is the **sparkline**: this whole exercise was about watching a
+number move over a window rather than trusting a spec, so the header shows the real recent
+history instead of a lone digit.
+
+Every interactive control is custom-drawn, because stock Win32 widgets cannot be made to
+look like this and, in the case of `TrackBar`, actively misbehave (see below).
+
+## Bugs found and fixed while building this
+
+Kept here because each one is a trap worth remembering.
+
+**The UI lied about the machine.** Applying on `MouseUp` meant wheel and keyboard changes
+never committed — the EPP slider drifted to 90 while the registry still held 80. Commits
+are now debounced 600 ms after *any* value change.
+
+**The mouse wheel silently rewrote system settings.** A focused Win32 `TrackBar` swallows
+wheel events and moves its own thumb, so scrolling the window changed a power setting.
+Every control here refuses the wheel.
+
+**The window scrolled itself away from its own header.** An `AutoScroll` panel calls
+`ScrollToControl` whenever focus moves. `SteadyPanel` overrides it to stay put.
+
+**It cost 3.75% of a CPU core** — absurd for something whose job is saving power — by
+constructing a `ManagementObjectSearcher` on every poll. Now **0.16%**.
+
+**`0.00 watts drawn` while charging.** The energy counter barely moves on AC, so the
+computed figure read as "using no power". It now says what it actually knows.
+
+**A crash with no message.** `BeginInvoke` in the constructor, before the window handle
+exists. There is now a global handler that writes `%LOCALAPPDATA%\PowerDial\crash.log`.
+
+**An `AutoSize` Card wrapping a docked `AutoSize` panel** made the form open full-screen
+and paint the GPU section twice.
+
+## Files
+
+| File | |
+|---|---|
+| `PowerCfg.cs` | the ten settings, registry reads, `powercfg` writes, info text |
+| `Battery.cs` | WMI battery sampling and the watts calculation |
+| `Brightness.cs` | WMI backlight get/set |
+| `GpuWatch.cs` | discrete-GPU waker detection |
+| `Baseline.cs` | the restore point |
+| `Presets.cs` | the three profiles |
+| `Charts.cs` | the measured model, and the four analytics views |
+| `Theme.cs` | palette, type, drawing helpers |
+| `Widgets.cs` | Card, PillButton, Slider, Picker, InfoDot, SectionToggle, Sparkline, SteadyPanel |
+| `MainForm.cs` | window and readout |
+
+## Tests
+
+Both are read-only and safe to run any time.
+
+    cd src\PowerDial-selftest && dotnet run -c Release   # live machine: every setting readable, values match
+    cd src\PowerDial-uitest   && dotnet run -c Release   # drives the real window: 30 checks
+
+The UI test builds the actual `MainForm` off-screen and drives the controls directly
+rather than firing synthetic mouse events, which kept missing and once snapped the window
+to half the screen. Set `PD_SHOTS` to a directory to have it render the collapsed and
+expanded states to PNGs.
+
+## Known limits
+
+- Tuned for one machine. The GPU cost figures, the 0.04 W-per-brightness-point constant,
+  and `OriginalDesignMwh = 70562` are all specific to this laptop.
+- The watts figure needs a full window, and reads high at low charge, where a degraded
+  pack's internal resistance inflates measured drain relative to actual consumption.
+- It cannot fix the background-app permissions itself — that is a UWP permission, not a
+  power setting. It detects the regression and opens the right Settings page.
+- Battery health is measured against a design capacity taken from the battery report's
+  capacity history, because HP rewrites the live `DesignedCapacity` field to equal the
+  learned capacity, which hides all degradation.

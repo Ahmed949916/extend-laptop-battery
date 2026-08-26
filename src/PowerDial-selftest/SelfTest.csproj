@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>SelfTest</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\PowerDial\PowerCfg.cs" />
+    <Compile Include="..\PowerDial\Battery.cs" />
+    <Compile Include="..\PowerDial\Brightness.cs" />
+    <Compile Include="..\PowerDial\GpuWatch.cs" />
+    <Compile Include="..\PowerDial\Presets.cs" />
+    <Compile Include="SelfTest.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="6.0.0" />
+  </ItemGroup>
+</Project>

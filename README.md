@@ -197,6 +197,7 @@ and paint the GPU section twice.
 | `GpuWatch.cs` | discrete-GPU waker detection |
 | `Baseline.cs` | the restore point |
 | `Presets.cs` | the three profiles |
+| `Advisor.cs` | the suggestions: what is wrong right now, and what fixes it |
 | `Charts.cs` | the charts and the process table |
 | `ProcessWatch.cs` | live per-process CPU and memory sampling |
 | `History.cs` | the on-disk record and the cumulative per-process tally |

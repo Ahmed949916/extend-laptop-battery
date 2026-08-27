@@ -19,7 +19,7 @@ the code.
     dotnet publish -c Release -o ..\..                  publish over the runnable copy
 
     cd src\PowerDial-selftest && dotnet run -c Release   read-only, checks the live machine
-    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 52 checks
+    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 61 checks
 
 .NET 6 SDK (6.0.428), `net6.0-windows`, `UseWindowsForms`. NuGet works; only dependency is
 `System.Management`. `msbuild` is not on PATH — use `dotnet build`.
@@ -73,6 +73,35 @@ of that works, health reports as unknown rather than 100%.
 readings are meaningless on AC; every setting change must reset the window; and
 `nvidia-smi` **wakes the dGPU**, so never call it inside a measurement window (allow
 60–90 s afterwards for RTD3).
+
+## The suggestions section
+
+`Advisor.cs` reads how the PC is set up right now and returns what is actually wrong with
+it, ranked. `MainForm` renders one card per suggestion with a button that carries it out.
+
+Four rules, and all four exist because breaking them makes the section worthless:
+
+1. **Only report what is wrong.** Every check reads the live value and stays quiet when it
+   is already sensible. An empty list has to mean "nothing left to do", not "not
+   implemented" - a list that always has twelve items is one nobody reads.
+2. **Never invent a saving.** `Suggestion.Gain` is only ever filled from something measured
+   on this PC, so it is usually null and no figure is drawn. Rank carries the priority
+   instead. A borrowed watt figure is worse than none, because a figure is what people act
+   on.
+3. **Scanning writes nothing.** The selftest snapshots every battery-side value, scans,
+   and compares. The whole section is worthless if reading it changes the machine.
+4. **Say so when there is no button.** Background apps and whatever is holding a discrete
+   GPU awake cannot be fixed by writing a setting - those are `FixKind.Advisory` and open
+   the Windows page rather than pretending. Ending such a process achieves nothing anyway;
+   it relaunches via `sihost.exe`.
+
+`Apply` writes with `PowerCfg.WriteDc`, reads straight back and compares before claiming
+anything. Brightness is compared with a tolerance, because plenty of panels expose only a
+handful of levels and snap to the nearest.
+
+The scan runs on startup, once more on the first poll, and after any change - not on the
+poll timer. The extra pass exists because CPU is a delta: the startup sample has memory
+figures and zero CPU, so anything judging a process by what it burns was reading zeroes.
 
 ## Telemetry and persistence
 

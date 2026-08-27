@@ -42,9 +42,17 @@ namespace PowerDial
         Card _watchCard;
         Label _watchSummary;
         LineChart _chartWatts;
-        CurveChart _chartCurve;
+        BatteryChart _batChart;
+        ProcessTable _procTable, _offTable;
         StackBar _barWatts, _barHealth;
-        Label _healthNote;
+        Label _healthNote, _histLabel, _procLabel, _procTotals;
+        PillButton _btnMem, _btnCpu, _btnBg;
+
+        readonly ProcessWatch _procWatch = new ProcessWatch();
+        List<ProcInfo> _procs = new List<ProcInfo>();
+        bool _sortCpu;
+        bool _bgOnly = true;
+        DateTime _lastHistory = DateTime.MinValue;
         PillButton _adminBtn;
         readonly List<PillButton> _presetBtns = new List<PillButton>();
 
@@ -67,7 +75,14 @@ namespace PowerDial
             BuildTray();
 
             _poll.Interval = 15000;
-            _poll.Tick += (s, e) => { _bat.Poll(); PushSample(); RefreshReadout(); };
+            _poll.Tick += (s, e) => {
+                _bat.Poll();
+                _procs = _procWatch.Sample();
+                PushSample();
+                RefreshReadout();
+                RefreshProcesses();
+                MaybeRecord();
+            };
             _poll.Start();
 
             _commit.Interval = 600;
@@ -87,10 +102,15 @@ namespace PowerDial
 
             string cap = Baseline.CaptureIfMissing();
 
+            int pruned = History.Prune();
             _bat.Poll();
+            _procs = _procWatch.Sample();
             LoadValues();
             RefreshReadout();
             RefreshWatch();
+            RefreshProcesses();
+            RefreshHistory(true);
+            if (pruned > 0) Log("Cleared " + pruned + " history file(s) older than " + History.KeepMonths + " months.");
 
             Log("Watching " + PowerCfg.ActiveSchemeName() +
                 (PowerCfg.IsElevated() ? ", running as admin." : ", not running as admin."));
@@ -282,38 +302,83 @@ namespace PowerDial
             _root.Controls.Add(_basicBox);
 
             // ---------------------------------------------------------- analytics
-            _root.Controls.Add(Heading("Analytics", "measured on this machine, not looked up",
-                "Four views of where the power actually goes.\n\n" +
-                "Draw over time is the raw measurement: each point is one 60-second window, so the " +
-                "trace shows what a change did rather than what it was meant to do. The dashed line " +
-                "is the running average.\n\n" +
-                "Runtime by brightness plots the three workloads against the backlight, with a marker " +
-                "where your slider currently sits. Where your watts go splits the present draw into " +
-                "backlight and everything else.\n\n" +
-                "Battery health is the part no setting can fix: this pack holds 43.9 Wh of the 70.6 Wh " +
-                "it shipped with."));
+            _root.Controls.Add(Heading("Analytics", "recorded here, kept on disk",
+                "Everything in this section is measured on this machine and written to " +
+                "%LOCALAPPDATA%\\PowerDial\\history, one line a minute, so it survives restarts " +
+                "instead of starting from nothing every launch.\n\n" +
+                "Power draw is the timed battery counter. Charge over time spans previous runs, " +
+                "amber where you were on battery.\n\n" +
+                "Running now is a live sample of every process, grouped by name. Since recording " +
+                "began is the cumulative tally - the process that has actually burned the most CPU " +
+                "across every session, which is the one costing you runtime.\n\n" +
+                "Background means no instance of it owns a visible window. Those are the ones worth " +
+                "questioning, because you are not the one using them."));
 
-            Card ac = new Card { Width = W, Height = 432, Margin = new Padding(0, 0, 0, 10) };
+            Card ac = new Card { Width = W, Height = 318, Margin = new Padding(0, 0, 0, 10) };
             ac.Controls.Add(new Label {
-                Text = "Draw over time", Location = new Point(14, 10), AutoSize = true,
+                Text = "Power draw", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _chartWatts = new LineChart {
-                Location = new Point(14, 32), Size = new Size(W - 30, 126),
+                Location = new Point(14, 32), Size = new Size(W - 30, 118),
                 Empty = "no samples yet - readings begin after 60 seconds on battery" };
             ac.Controls.Add(_chartWatts);
             ac.Controls.Add(new Label {
-                Text = "Runtime by brightness", Location = new Point(14, 168), AutoSize = true,
+                Text = "Charge over time", Location = new Point(14, 158), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
-            _chartCurve = new CurveChart { Location = new Point(14, 190), Size = new Size(W - 30, 156) };
-            ac.Controls.Add(_chartCurve);
-            ac.Controls.Add(new Label {
-                Text = "Where your watts go", Location = new Point(14, 354), AutoSize = true,
+            _batChart = new BatteryChart { Location = new Point(14, 180), Size = new Size(W - 30, 104) };
+            ac.Controls.Add(_batChart);
+            _histLabel = new Label {
+                Location = new Point(14, 292), Size = new Size(W - 30, 18),
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            ac.Controls.Add(_histLabel);
+            _root.Controls.Add(ac);
+
+            Card pc = new Card { Width = W, Height = 292, Margin = new Padding(0, 0, 0, 10) };
+            _procLabel = new Label {
+                Text = "Running now", Location = new Point(14, 10), Size = new Size(300, 18),
+                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel };
+            pc.Controls.Add(_procLabel);
+            _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 322, 6), Size = new Size(98, 26), Selected = true };
+            _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 218, 6), Size = new Size(80, 26) };
+            _btnBg = new PillButton { Text = "Background", Location = new Point(W - 132, 6), Size = new Size(118, 26), Selected = true };
+            _btnMem.Click += (s, e) => { _sortCpu = false; RefreshProcesses(); };
+            _btnCpu.Click += (s, e) => { _sortCpu = true; RefreshProcesses(); };
+            _btnBg.Click += (s, e) => { _bgOnly = !_bgOnly; RefreshProcesses(); };
+            pc.Controls.Add(_btnMem);
+            pc.Controls.Add(_btnCpu);
+            pc.Controls.Add(_btnBg);
+            _procTable = new ProcessTable {
+                Location = new Point(14, 40), Size = new Size(W - 30, ProcessTable.RowH * 9 + 22) };
+            pc.Controls.Add(_procTable);
+            _procTotals = new Label {
+                Location = new Point(14, 262), Size = new Size(W - 30, 18),
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            pc.Controls.Add(_procTotals);
+            _root.Controls.Add(pc);
+
+            Card oc = new Card { Width = W, Height = 216, Margin = new Padding(0, 0, 0, 10) };
+            oc.Controls.Add(new Label {
+                Text = "Since recording began", Location = new Point(14, 10), AutoSize = true,
+                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
+            oc.Controls.Add(new Label {
+                Text = "cumulative CPU time across every session", Location = new Point(176, 13),
+                AutoSize = true, Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel });
+            _offTable = new ProcessTable {
+                Location = new Point(14, 34), Size = new Size(W - 30, ProcessTable.RowH * 7 + 22),
+                SortByCpu = true, CpuHeader = "cpu minutes", CpuSuffix = " min", CpuFormat = "0.0",
+                MemHeader = "peak memory", Empty = "nothing recorded yet" };
+            oc.Controls.Add(_offTable);
+            _root.Controls.Add(oc);
+
+            Card wc2 = new Card { Width = W, Height = 104, Margin = new Padding(0, 0, 0, 10) };
+            wc2.Controls.Add(new Label {
+                Text = "Where your watts go", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _barWatts = new StackBar {
-                Location = new Point(14, 378), Size = new Size(W - 30, 44),
+                Location = new Point(14, 36), Size = new Size(W - 30, 44),
                 Empty = "waiting for a reading on battery" };
-            ac.Controls.Add(_barWatts);
-            _root.Controls.Add(ac);
+            wc2.Controls.Add(_barWatts);
+            _root.Controls.Add(wc2);
 
             Card hc = new Card { Width = W, Height = 104, Margin = new Padding(0, 0, 0, 10) };
             hc.Controls.Add(new Label {
@@ -554,6 +619,7 @@ namespace PowerDial
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); return; }
+            History.SaveOffenders();
             if (_tray != null) _tray.Visible = false;
             base.OnFormClosing(e);
         }
@@ -606,6 +672,100 @@ namespace PowerDial
             _brightCost.Text = "~" + (_brightSlider.Value * Brightness.WattsPerPoint).ToString("0.0") + " W";
         }
 
+        void RefreshProcesses()
+        {
+            _btnMem.Selected = !_sortCpu; _btnMem.Invalidate();
+            _btnCpu.Selected = _sortCpu; _btnCpu.Invalidate();
+            _btnBg.Selected = _bgOnly; _btnBg.Invalidate();
+
+            _procTable.SortByCpu = _sortCpu;
+            _procTable.Rows = ProcessWatch.TopBy(_procs, _sortCpu, _bgOnly, 9);
+            _procTable.Invalidate();
+
+            int n = 0;
+            foreach (ProcInfo p in _procs) if (!_bgOnly || p.Background) n++;
+            _procTotals.Text = n + (_bgOnly ? " background" : " total") + " processes  ·  " +
+                               (ProcessWatch.TotalMb(_procs, _bgOnly) / 1024.0).ToString("0.00") + " GB  ·  " +
+                               ProcessWatch.TotalCpu(_procs, _bgOnly).ToString("0.0") + "% of one core";
+
+            // the cumulative table follows the same background filter
+            RefreshOffenders();
+        }
+
+        void RefreshOffenders()
+        {
+            List<ProcInfo> rows = new List<ProcInfo>();
+            foreach (Offender o in History.TopOffenders(7, _bgOnly))
+                rows.Add(new ProcInfo {
+                    Name = o.Name, Instances = 1, Background = o.Background,
+                    WorkingSetMb = o.PeakMb, CpuPercent = o.CpuSeconds / 60.0
+                });
+            _offTable.Rows = rows;
+            _offTable.Invalidate();
+        }
+
+        /// <summary>Reload the saved history and redraw everything that comes from it.</summary>
+        void RefreshHistory(bool seedChart)
+        {
+            List<HistPoint> pts = History.Recent(1440);      // about a day at one a minute
+            _batChart.SetData(pts);
+
+            if (seedChart)
+            {
+                List<double> w = new List<double>();
+                foreach (HistPoint p in pts) if (!p.Ac && p.W > 0.05) w.Add(p.W);
+                _chartWatts.Seed(w);
+            }
+
+            History.Stats st = History.Summarise(pts);
+            string line = st.Points + " minutes recorded";
+            if (st.BatteryPoints > 0)
+                line += "   ·   " + FmtHours(st.BatteryMinutes / 60.0) + " of it on battery, averaging " +
+                        st.AvgWatts.ToString("0.00") + " W (" + st.MinWatts.ToString("0.00") + " to " +
+                        st.MaxWatts.ToString("0.00") + ")";
+            long bytes = History.DiskBytes();
+            line += "   ·   " + (bytes / 1024.0).ToString("0") + " KB on disk";
+            _histLabel.Text = line;
+
+            RefreshOffenders();
+        }
+
+        /// <summary>Write one history point a minute. Anything faster is noise and disk churn.</summary>
+        void MaybeRecord()
+        {
+            DateTime now = DateTime.UtcNow;
+            if (_lastHistory != DateTime.MinValue && (now - _lastHistory).TotalSeconds < 60) return;
+            double interval = _lastHistory == DateTime.MinValue ? 60 : (now - _lastHistory).TotalSeconds;
+            _lastHistory = now;
+
+            bool draining = !_bat.OnAc && _bat.Watts.HasValue && _bat.Watts.Value > 0.05;
+            HistPoint p = new HistPoint {
+                T = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                W = draining ? Math.Round(_bat.Watts.Value, 3) : 0,
+                Pct = _bat.PercentOfFull,
+                Ac = _bat.OnAc,
+                Br = _brightSlider.Value,
+                Cpu = Math.Round(ProcessWatch.TotalCpu(_procs, false), 1),
+                BgMb = Math.Round(ProcessWatch.TotalMb(_procs, true), 0),
+                Top = TopSummary()
+            };
+            History.Append(p, _procs, interval);
+            if (draining) _chartWatts.Push(p.W);
+            RefreshHistory(false);
+        }
+
+        string TopSummary()
+        {
+            List<ProcInfo> top = ProcessWatch.TopBy(_procs, true, false, 3);
+            string s = "";
+            foreach (ProcInfo p in top)
+            {
+                if (s.Length > 0) s += "|";
+                s += p.Name + " " + p.CpuPercent.ToString("0.0");
+            }
+            return s;
+        }
+
         void PushSample()
         {
             if (!_bat.OnAc && _bat.Watts.HasValue && _bat.Watts.Value > 0)
@@ -623,12 +783,6 @@ namespace PowerDial
 
         void RefreshAnalytics()
         {
-            double capWh = (_bat.FullChargeMwh.HasValue ? _bat.FullChargeMwh.Value : 43905) / 1000.0;
-
-            _chartCurve.Brightness = _brightSlider.Value;
-            _chartCurve.CapacityWh = capWh;
-            _chartCurve.Invalidate();
-
             _barWatts.Segments.Clear();
             if (!_bat.OnAc && _bat.Watts.HasValue && _bat.Watts.Value > 0.1)
             {

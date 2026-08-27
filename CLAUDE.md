@@ -59,6 +59,41 @@ Sanity checks the UI test asserts: 30% idle → 6.92 W → 6h21m; 70% active →
 AC; every setting change must reset the window; and `nvidia-smi` **wakes the dGPU**, so
 never call it inside a measurement window (allow 60–90 s afterwards for RTD3).
 
+## Telemetry and persistence
+
+`ProcessWatch` samples every process each poll, grouped by executable name. CPU is a
+**delta** — `Process.TotalProcessorTime` is cumulative, so the first sample after start has
+memory figures and zero CPU, and everything after is real. `TotalProcessorTime` throws
+Access Denied on protected processes; that is expected and swallowed. A process group is
+*background* when no instance of it owns a `MainWindowHandle`.
+
+`History` writes one JSON line a minute to `%LOCALAPPDATA%\PowerDial\history\YYYY-MM.jsonl`:
+
+    {"T":1787800337,"W":8.27,"Pct":79,"Ac":false,"Br":42,"Cpu":53,"BgMb":7554,
+     "Top":"claude 40.6|nvcontainer 4.4|uihost 2.2"}
+
+Roughly 150 bytes a minute, ~6 MB for a month of continuous use. Files older than
+`History.KeepMonths` (3) are deleted at startup. `offenders.json` alongside it is the
+cumulative per-process tally — core-seconds burned and peak memory — which is what makes
+"what has actually been eating the battery" survive reboots instead of being re-guessed.
+
+Rules that matter here:
+
+- `HistPoint.When` is `[JsonIgnore]`. System.Text.Json serialises get-only properties by
+  default, which was writing a redundant ISO timestamp on every line.
+- The watts chart is driven by history (one point a minute), **not** by the 15 s poll. The
+  header sparkline is the live 15 s trace. Do not mix them.
+- Gaps greater than 15 minutes in the charge chart are left unjoined — that means the app
+  was not running, not that the battery teleported.
+- Process sampling costs about **0.2% of a core**, taking the app from 0.16% to ~0.36%.
+  If that grows, sample processes less often than the battery.
+
+**There are no modelled analytics.** A `CurveChart` predicting runtime-vs-brightness from
+three hardcoded workload constants used to live in `Charts.cs`; it was removed because it
+described a laptop in the abstract rather than this one now. The only surviving constant is
+`Model.WattsPerPoint` (0.04 W), which is a measurement applied to the live reading to split
+the current draw — not a prediction. Do not reintroduce modelled numbers as analytics.
+
 ## The thing that actually matters
 
 On this muxless hybrid laptop, **what wakes the discrete GPU matters far more than what

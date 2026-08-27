@@ -72,7 +72,7 @@ class UiTest
         Console.WriteLine("--- structure ---");
 
         int sliders = 0, pickers = 0, infoDots = 0, cards = 0, toggles = 0, sparks = 0, pills = 0;
-        int lineCharts = 0, curveCharts = 0, stackBars = 0;
+        int lineCharts = 0, batCharts = 0, stackBars = 0, procTables = 0;
         SectionToggle basicToggle = null;
         foreach (Control c in all)
         {
@@ -83,7 +83,8 @@ class UiTest
             if (c is Sparkline) sparks++;
             if (c is PillButton) pills++;
             if (c is LineChart) lineCharts++;
-            if (c is CurveChart) curveCharts++;
+            if (c is BatteryChart) batCharts++;
+            if (c is ProcessTable) procTables++;
             if (c is StackBar) stackBars++;
             SectionToggle st = c as SectionToggle;
             if (st != null) { toggles++; if (st.Caption == "Basic settings") basicToggle = st; }
@@ -107,21 +108,63 @@ class UiTest
         Check("no stock TrackBar/ComboBox left", legacy == 0, legacy + " found");
         Console.WriteLine();
 
-        Console.WriteLine("--- analytics ---");
+        Console.WriteLine("--- analytics: real, not modelled ---");
         Check("watts-over-time chart", lineCharts == 1, lineCharts + " found");
-        Check("runtime-by-brightness chart", curveCharts == 1, curveCharts + " found");
+        Check("charge-over-time chart from saved history", batCharts == 1, batCharts + " found");
+        Check("two process tables (live + cumulative)", procTables == 2, procTables + " found");
         Check("two stacked bars (watt split + health)", stackBars == 2, stackBars + " found");
-        Check("info icons now cover sections too", infoDots >= 17, infoDots + " found");
+        Check("info icons cover sections too", infoDots >= 17, infoDots + " found");
+        Check("the modelled runtime curve is gone",
+              Type.GetType("PowerDial.CurveChart, UiTest") == null);
+        Check("measured backlight constant kept", Math.Abs(Model.Backlight(30) - 1.2) < 0.001,
+              Model.Backlight(30).ToString("0.00") + " W at 30%");
 
-        double idle30 = Model.Draw(Model.IdleBase, 30);
-        Check("model reproduces the measured 6.92 W at 30% idle",
-              Math.Abs(idle30 - 6.92) < 0.01, idle30.ToString("0.00") + " W");
-        double vid70 = Model.Draw(Model.VideoBase, 70);
-        Check("model reproduces the measured 12.93 W at 70% active",
-              Math.Abs(vid70 - 12.93) < 0.01, vid70.ToString("0.00") + " W");
-        double h = Model.Hours(43.905, idle30);
-        Check("and the 6h21m runtime that came with it",
-              Math.Abs(h - 6.345) < 0.02, h.ToString("0.00") + " h");
+        Console.WriteLine();
+        Console.WriteLine("--- live process telemetry ---");
+        ProcessWatch pw = new ProcessWatch();
+        List<ProcInfo> first = pw.Sample();
+        Check("enumerates real processes", first.Count > 20, first.Count + " names");
+        System.Threading.Thread.Sleep(2500);
+        List<ProcInfo> second = pw.Sample();
+        double cpuTotal = ProcessWatch.TotalCpu(second, false);
+        Check("second sample yields real CPU deltas", cpuTotal > 0,
+              cpuTotal.ToString("0.0") + "% of one core across all processes");
+        Check("memory figures are real", ProcessWatch.TotalMb(second, false) > 100,
+              ProcessWatch.TotalMb(second, false).ToString("0") + " MB");
+        int bg = 0;
+        foreach (ProcInfo pi in second) if (pi.Background) bg++;
+        Check("background processes identified", bg > 0 && bg < second.Count,
+              bg + " of " + second.Count + " have no window");
+        List<ProcInfo> topMem = ProcessWatch.TopBy(second, false, true, 5);
+        Console.WriteLine("  top background by memory:");
+        foreach (ProcInfo pi in topMem)
+            Console.WriteLine("    " + pi.Name.PadRight(30) + pi.WorkingSetMb.ToString("0").PadLeft(6) +
+                              " MB   " + pi.CpuPercent.ToString("0.0") + "%");
+        Check("ranking is descending",
+              topMem.Count < 2 || topMem[0].WorkingSetMb >= topMem[topMem.Count - 1].WorkingSetMb);
+
+        Console.WriteLine();
+        Console.WriteLine("--- persistence ---");
+        long bytesBefore = History.DiskBytes();
+        HistPoint hp = new HistPoint {
+            T = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), W = 7.77, Pct = 55, Ac = false,
+            Br = 30, Cpu = 4.2, BgMb = 1234, Top = "uitest 1.0"
+        };
+        History.Append(hp, second, 60);
+        History.SaveOffenders();
+        List<HistPoint> back = History.Recent(50);
+        bool found = false;
+        foreach (HistPoint q in back) if (Math.Abs(q.W - 7.77) < 0.001 && q.Pct == 55) found = true;
+        Check("a written point reads back from disk", found, back.Count + " points on file");
+        Check("history file grew", History.DiskBytes() >= bytesBefore,
+              (History.DiskBytes() / 1024.0).ToString("0") + " KB");
+        Check("cumulative tally is populated", History.TopOffenders(5, false).Count > 0,
+              History.LoadOffenders().Count + " processes tracked");
+        Console.WriteLine("  worst by cumulative CPU:");
+        foreach (Offender o in History.TopOffenders(5, false))
+            Console.WriteLine("    " + o.Name.PadRight(30) + (o.CpuSeconds / 60.0).ToString("0.00") +
+                              " cpu-min   peak " + o.PeakMb.ToString("0") + " MB");
+        Console.WriteLine("  stored in " + History.Folder);
         Console.WriteLine();
 
         // ---- info text is actually populated ----------------------------------
@@ -220,6 +263,7 @@ class UiTest
         if (!string.IsNullOrEmpty(outDir))
         {
             Shoot(f, System.IO.Path.Combine(outDir, "ui-collapsed.png"), 1180);
+            Shoot(f, System.IO.Path.Combine(outDir, "ui-full.png"), 3100);
             basicToggle.Toggle();
             Application.DoEvents();
             Shoot(f, System.IO.Path.Combine(outDir, "ui-expanded.png"), 1700);

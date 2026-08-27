@@ -22,7 +22,7 @@ presets, **Restore original settings**, or **Quit**. Only one instance runs at a
       README.md                 this file
       src\PowerDial\            source
       src\PowerDial-selftest\   read-only checks against the live machine
-      src\PowerDial-uitest\     drives the real window, 30 checks
+      src\PowerDial-uitest\     drives the real window, 42 checks
 
     Desktop\PowerDial.lnk       shortcut to the exe
 
@@ -69,15 +69,31 @@ section rather than removed.
 **An info icon on every setting and every section**, explaining in plain terms what it
 does, what it costs, and which figures were measured rather than assumed.
 
-**Analytics.** Four views, all built from measurements taken on this machine:
+**Analytics.** All of it measured on this machine, and written to disk so it survives
+restarts rather than starting from nothing each launch:
 
-- *Draw over time* - the raw trace. Each point is one 60-second window, with a dashed
-  running average, so you can see what a change actually did.
-- *Runtime by brightness* - the three workloads plotted against the backlight, with a
-  marker where your slider sits and the resulting runtime beside each curve.
-- *Where your watts go* - the current draw split into backlight and everything else.
+- *Power draw* - the raw trace, one point a minute, with a dashed running average.
+- *Charge over time* - spans previous runs, amber where you were on battery. Gaps of more
+  than 15 minutes are left unjoined, because that means the app was not running.
+- *Running now* - a live sample of every process, grouped by name, with instance counts and
+  a bar proportional to whichever column you sort on. Toggle memory / CPU, and filter to
+  background only.
+- *Since recording began* - the cumulative tally. Which process has actually burned the
+  most CPU across every session, which is the one costing you runtime. This is the view
+  that named `OneDrive.Sync.Service` as the top consumer here.
+- *Where your watts go* - the live draw split into backlight and everything else.
 - *Battery health* - 43.9 Wh still held against the 70.6 Wh it shipped with, and what the
   missing capacity costs you in hours at the present draw.
+
+*Background* means no instance of that process owns a visible window. Those are the ones
+worth questioning, because you are not the one using them.
+
+Recorded to `%LOCALAPPDATA%\PowerDial\history` at about 150 bytes a minute, roughly 6 MB
+for a month of continuous use, pruned after three months.
+
+There are deliberately **no modelled analytics**. An earlier version drew predicted
+runtime-versus-brightness curves from three hardcoded workload constants; it was removed
+because it described a laptop in the abstract instead of this one, now.
 
 **Discrete GPU watch.** The most useful part. An awake-but-idle RTX 3050 Ti draws **~17 W**
 here while reporting 0% utilisation and 0 MiB allocated — more than the whole rest of the
@@ -169,7 +185,9 @@ and paint the GPU section twice.
 | `GpuWatch.cs` | discrete-GPU waker detection |
 | `Baseline.cs` | the restore point |
 | `Presets.cs` | the three profiles |
-| `Charts.cs` | the measured model, and the four analytics views |
+| `Charts.cs` | the charts, the process table, and the one measured constant |
+| `ProcessWatch.cs` | live per-process CPU and memory sampling |
+| `History.cs` | the on-disk record and the cumulative per-process tally |
 | `Theme.cs` | palette, type, drawing helpers |
 | `Widgets.cs` | Card, PillButton, Slider, Picker, InfoDot, SectionToggle, Sparkline, SteadyPanel |
 | `MainForm.cs` | window and readout |
@@ -179,7 +197,7 @@ and paint the GPU section twice.
 Both are read-only and safe to run any time.
 
     cd src\PowerDial-selftest && dotnet run -c Release   # live machine: every setting readable, values match
-    cd src\PowerDial-uitest   && dotnet run -c Release   # drives the real window: 30 checks
+    cd src\PowerDial-uitest   && dotnet run -c Release   # drives the real window: 42 checks
 
 The UI test builds the actual `MainForm` off-screen and drives the controls directly
 rather than firing synthetic mouse events, which kept missing and once snapped the window

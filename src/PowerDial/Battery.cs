@@ -21,11 +21,15 @@ namespace PowerDial
     /// </summary>
     public class BatteryMonitor
     {
-        /// <summary>Original design capacity, from the Windows battery report capacity
-        /// history (peak 70,562 mWh in 2022). HP rewrites the live DesignedCapacity
-        /// field to equal the learned capacity, which hides all degradation, and
-        /// BatteryStaticData throws "Generic failure" on this hardware.</summary>
-        public const int OriginalDesignMwh = 70562;
+        /// <summary>
+        /// Original design capacity in mWh, detected per machine. 0 when it cannot be
+        /// established, in which case health is reported as unknown rather than guessed.
+        ///
+        /// Some firmware rewrites the live design-capacity field to equal the learned
+        /// capacity, which hides all degradation, so Machine falls back to the highest
+        /// capacity ever recorded in the Windows battery report.
+        /// </summary>
+        public static int OriginalDesignMwh { get { return Config.EffectiveDesignMwh; } }
 
         public int WindowSeconds = 60;
 
@@ -47,14 +51,22 @@ namespace PowerDial
         /// <summary>Positive = draining, negative = charging. Null until the window fills.</summary>
         public double? Watts { get; private set; }
 
+        /// <summary>Null when there is no battery, or no trustworthy design capacity.</summary>
         public double? HealthPercent
         {
             get
             {
                 if (!FullChargeMwh.HasValue || FullChargeMwh.Value <= 0) return null;
-                return 100.0 * FullChargeMwh.Value / OriginalDesignMwh;
+                int design = OriginalDesignMwh;
+                if (design <= 0) return null;
+                // a design figure at or below the current charge tells us nothing useful
+                if (design < FullChargeMwh.Value) return null;
+                return 100.0 * FullChargeMwh.Value / design;
             }
         }
+
+        /// <summary>False on a desktop, so the interface can drop the battery panels.</summary>
+        public bool Present { get { return Machine.HasBattery; } }
 
         /// <summary>Hours left at the present rate, or null if not draining.</summary>
         public double? HoursRemaining

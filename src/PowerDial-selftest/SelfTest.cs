@@ -12,6 +12,13 @@ class SelfTest
         Console.WriteLine("=== PowerDial self-test (READ-ONLY - changes nothing) ===");
         Console.WriteLine();
 
+        Console.WriteLine("--- machine ---");
+        Machine.Detect(true);
+        Console.WriteLine("  " + Machine.Summary());
+        Console.WriteLine("  design capacity : " + (Machine.DesignCapacityMwh > 0
+            ? Machine.DesignCapacityMwh + " mWh (" + Machine.DesignCapacitySource + ")"
+            : "unknown"));
+        Console.WriteLine();
         Console.WriteLine("--- environment ---");
         Console.WriteLine("  elevated      : " + PowerCfg.IsElevated());
         Console.WriteLine("  active scheme : " + PowerCfg.ActiveSchemeName());
@@ -47,10 +54,16 @@ class SelfTest
         Console.WriteLine("--- brightness ---");
         int? b = Brightness.Get();
         Console.WriteLine("  current : " + (b.HasValue ? b.Value + "%" : "unavailable"));
-        Check("brightness readable", b.HasValue);
-        if (b.HasValue)
-            Console.WriteLine("  backlight cost at this level: ~" +
-                (b.Value * Brightness.WattsPerPoint).ToString("0.00") + " W");
+        Check("brightness readable when the display supports it",
+              b.HasValue || !Machine.BrightnessControllable,
+              Machine.BrightnessControllable ? "controllable" : "not controllable on this display");
+        // Model lives in Charts.cs, which this project does not pull in (it would drag
+        // in WinForms); the value itself comes from Config either way.
+        double? perPoint = Config.BacklightWattsPerPoint;
+        double? bw = (b.HasValue && perPoint.HasValue)
+            ? (double?)(b.Value * perPoint.Value) : null;
+        Console.WriteLine("  backlight cost: " + (bw.HasValue
+            ? "~" + bw.Value.ToString("0.00") + " W" : "not measured on this display yet"));
         Console.WriteLine();
 
         Console.WriteLine("--- gpu watchdog ---");
@@ -58,8 +71,79 @@ class SelfTest
         foreach (Finding item in f)
             Console.WriteLine(string.Format("  [{0}] {1,-38} {2}",
                 item.Ok ? "OK" : "!!", item.Name, item.Detail));
-        Console.WriteLine("  total flagged waste: ~" + GpuWatch.TotalCost(f).ToString("0.0") + " W");
-        Check("watchdog produced findings", f.Count >= 7, f.Count + " findings");
+        double? cost = GpuWatch.TotalCost(f);
+        Console.WriteLine("  flagged cost: " + (cost.HasValue
+            ? "~" + cost.Value.ToString("0.0") + " W" : "not measured on this PC"));
+        Check("watchdog produced a verdict", f.Count >= 1, f.Count + " findings");
+        Console.WriteLine();
+
+        Console.WriteLine("--- suggestions: what would make this PC last longer ---");
+
+        // scanning must not write anything. Snapshot every battery-side value first,
+        // scan, then compare - the whole section is worthless if reading it changes the
+        // machine, and that is exactly the kind of bug that hides.
+        Dictionary<string, int?> beforeScan = new Dictionary<string, int?>();
+        foreach (Knob k in PowerCfg.Knobs) beforeScan[k.Key] = PowerCfg.Read(k, true);
+
+        ProcessWatch spw = new ProcessWatch();
+        spw.Sample();
+        System.Threading.Thread.Sleep(1200);
+        List<ProcInfo> sprocs = spw.Sample();
+        List<Suggestion> sug = Advisor.Scan(null, sprocs, f);
+
+        int drifted = 0;
+        foreach (Knob k in PowerCfg.Knobs)
+        {
+            int? now = PowerCfg.Read(k, true);
+            bool same = now.HasValue == beforeScan[k.Key].HasValue &&
+                        (!now.HasValue || now.Value == beforeScan[k.Key].Value);
+            if (!same) { drifted++; Console.WriteLine("  WROTE SOMETHING: " + k.Label); }
+        }
+        Check("scanning changed nothing", drifted == 0, PowerCfg.Knobs.Count + " settings unchanged");
+
+        Console.WriteLine("  " + sug.Count + " suggestion(s) for this machine:");
+        int badRank = 0, badTarget = 0, thinText = 0, noAction = 0, inventedGain = 0, pointless = 0;
+        int lastRank = int.MaxValue;
+        foreach (Suggestion g in sug)
+        {
+            Console.WriteLine("    [" + g.Rank.ToString().PadLeft(3) + "] " + g.Title);
+            Console.WriteLine("          " + (g.Kind == FixKind.Advisory ? "opens " + g.OpenUri : g.Change) +
+                              (g.Gain.HasValue ? "   ~" + g.Gain.Value.ToString("0.0") + " W" : ""));
+
+            if (g.Rank > lastRank) badRank++;
+            lastRank = g.Rank;
+
+            if (string.IsNullOrWhiteSpace(g.Title) || string.IsNullOrWhiteSpace(g.Detail) ||
+                g.Info == null || g.Info.Length < 80) thinText++;
+            if (string.IsNullOrWhiteSpace(g.ActionLabel)) noAction++;
+            if (g.Gain.HasValue && g.Gain.Value <= 0) inventedGain++;
+
+            if (g.Kind == FixKind.Advisory)
+            {
+                if (string.IsNullOrEmpty(g.OpenUri)) noAction++;
+            }
+            else if (g.Kind == FixKind.Setting)
+            {
+                Knob k = PowerCfg.Find(g.KnobKey);
+                if (k == null) { badTarget++; continue; }
+                if (k.Choices != null && !k.Choices.ContainsKey(g.Target)) badTarget++;
+                if (k.Choices == null && (g.Target < k.Min || g.Target > k.Max)) badTarget++;
+                if (g.Current == g.Target) pointless++;
+            }
+        }
+
+        Check("ranked most important first", badRank == 0);
+        Check("every target is a value the setting accepts", badTarget == 0);
+        Check("nothing suggests the value already set", pointless == 0);
+        Check("every suggestion explains itself", thinText == 0, "title, detail and 80+ chars of info");
+        Check("every suggestion has something to press", noAction == 0);
+        Check("no saving is quoted unless measured here", inventedGain == 0,
+              Config.Current.DiscreteGpuWakeWatts.HasValue || Config.BacklightWattsPerPoint.HasValue
+                  ? "some figures are calibrated" : "nothing calibrated yet, so no figures shown");
+
+        // an empty list is a real answer, not a broken scanner
+        if (sug.Count == 0)
+            Console.WriteLine("  nothing to suggest - this machine is already set up for endurance");
         Console.WriteLine();
 
         Console.WriteLine("--- presets sanity ---");

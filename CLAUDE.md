@@ -1,7 +1,12 @@
 # control-battery — PowerDial
 
-A WinForms tray app for controlling the power settings that affect battery life on **one
-specific laptop**: HP OMEN 16-c0xxx, Ryzen 7 5800H + RTX 3050 Ti, Windows 11 25H2.
+A WinForms tray app for controlling the power settings that affect battery life, plus live
+process telemetry and a persistent record of what the machine has been doing.
+
+It runs on **any Windows 10/11 PC** - gaming laptop, ultrabook or desktop. It began life
+tuned to one laptop (HP OMEN 16-c0xxx); everything specific to that machine has been
+replaced by detection or by per-machine measurement. Do not put hardware facts back into
+the code.
 
 `README.md` has the full narrative. This file is the working brief.
 
@@ -14,7 +19,7 @@ specific laptop**: HP OMEN 16-c0xxx, Ryzen 7 5800H + RTX 3050 Ti, Windows 11 25H
     dotnet publish -c Release -o ..\..                  publish over the runnable copy
 
     cd src\PowerDial-selftest && dotnet run -c Release   read-only, checks the live machine
-    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 34 checks
+    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 52 checks
 
 .NET 6 SDK (6.0.428), `net6.0-windows`, `UseWindowsForms`. NuGet works; only dependency is
 `System.Management`. `msbuild` is not on PATH — use `dotnet build`.
@@ -39,25 +44,35 @@ are missing from those images — that is the capture, not the app.
 5. **Elevation is `asInvoker` on purpose.** EPP and brightness succeed unelevated here.
    Anything needing admin reports it and offers *Run as admin*.
 
-## Measured constants — these came from this machine, not documentation
+## Nothing about the hardware is hardcoded
 
-| | |
+`Machine.cs` detects it; `Config.cs` stores what has to be measured. The rule: **a value
+that varies by hardware is either detected or measured, never assumed.** Where neither has
+happened the interface says "not measured on this PC" rather than showing a borrowed number.
+
+| Fact | Where it comes from |
 |---|---|
-| Backlight | **0.04 W per brightness point** (~4 W across the range) |
-| Idle base (reading, PDFs) | **5.72 W** at 0% backlight |
-| Browsing / chat / docs base | **7.44 W** |
-| Video / active dev base | **10.13 W** |
-| Usable capacity | **43,905 mWh** |
-| Original design capacity | **70,562 mWh** → **62% health** |
-| Awake-but-idle RTX 3050 Ti | **~17 W** |
+| Battery present, form factor, vendor, model | `Machine.Detect` via WMI + chassis type |
+| GPUs, vendor, discrete vs integrated, hybrid | `Win32_VideoController` + PNP vendor id |
+| Brightness controllable | presence of `WmiMonitorBrightnessMethods` |
+| Which power settings exist | `PowerCfg.Exists` — the registry settings store |
+| **Original design capacity** | see below |
+| Backlight watts per point | `Config` — measured, null until then |
+| Discrete GPU wake cost | `Config` — measured, null until then |
 
-Sanity checks the UI test asserts: 30% idle → 6.92 W → 6h21m; 70% active → 12.93 W.
+**Design capacity** is the interesting one. Several vendors rewrite the live
+design-capacity field to equal the learned capacity, which hides all degradation — on the
+original test laptop every live source reported 43,905 mWh for a pack that shipped at
+70,562. So the chain is: `Win32_Battery` → `BatteryStaticData` → **the highest capacity
+ever recorded in `powercfg /batteryreport /xml`**, which recovers the true figure. If none
+of that works, health reports as unknown rather than 100%.
 
-**How draw is measured:** HP firmware never reports an instantaneous rate — ACPI
-`DischargeRate` returns an invalid sentinel. Draw is timed from `RemainingCapacity` over a
-60-second window. Consequences: the first reading takes 60 s; readings are meaningless on
-AC; every setting change must reset the window; and `nvidia-smi` **wakes the dGPU**, so
-never call it inside a measurement window (allow 60–90 s afterwards for RTD3).
+**How draw is measured:** many machines never report an instantaneous rate — the ACPI
+`DischargeRate` field returns an invalid sentinel. Draw is therefore timed from
+`RemainingCapacity` over a 60-second window. Consequences: the first reading takes 60 s;
+readings are meaningless on AC; every setting change must reset the window; and
+`nvidia-smi` **wakes the dGPU**, so never call it inside a measurement window (allow
+60–90 s afterwards for RTD3).
 
 ## Telemetry and persistence
 
@@ -90,28 +105,42 @@ Rules that matter here:
 
 **There are no modelled analytics.** A `CurveChart` predicting runtime-vs-brightness from
 three hardcoded workload constants used to live in `Charts.cs`; it was removed because it
-described a laptop in the abstract rather than this one now. The only surviving constant is
-`Model.WattsPerPoint` (0.04 W), which is a measurement applied to the live reading to split
-the current draw — not a prediction. Do not reintroduce modelled numbers as analytics.
+described a laptop in the abstract rather than the one in front of you. What replaced it is
+`Model.WattsPerPoint`, which returns `Config.BacklightWattsPerPoint` — a value measured on
+this PC or `null` — and is applied to the live reading to split the current draw, not to
+predict one. Do not reintroduce modelled numbers as analytics.
+
+## Portability rules
+
+- **Never reintroduce a hardware constant.** If a number varies by machine it belongs in
+  `Config`, measured, or it does not get shown.
+- **Guard everything by capability.** No battery means the draw, charge and health panels
+  stand down. No discrete GPU means the GPU watch says so instead of inventing work. A
+  setting Windows does not define on this PC is dropped, not shown dead.
+- **A desktop is a supported target**, not an edge case. It has no battery and its GPU
+  cannot be powered down, so most of the battery machinery is inert - but the settings,
+  process telemetry, history and GPU listing all still apply.
+- Vendor detection in `GpuWatch` covers HP, ASUS, Lenovo, MSI, Acer, Dell/Alienware plus
+  Razer, Corsair, Logitech and SteelSeries. Add to the tables; do not special-case.
 
 ## The thing that actually matters
 
-On this muxless hybrid laptop, **what wakes the discrete GPU matters far more than what
-uses the CPU.** Three separate things were caught doing it and none looked expensive in
-Task Manager:
+On a hybrid laptop, **what wakes the discrete GPU matters far more than what uses the
+CPU.** An awake but idle discrete GPU can draw anywhere from about 5 W to over 20 W while
+reporting 0% utilisation, which is why it hides so well in Task Manager.
 
-| | |
-|---|---|
-| NVIDIA Instant Replay / overlay | ~11.8 W |
-| OMEN Command Center background | ~11.1 W |
-| OMEN Light Studio background (the RGB engine) | ~12.0 W |
+The original test machine is the worked example: three separate things were each holding an
+RTX 3050 Ti awake for roughly 17 W — NVIDIA Instant Replay, OMEN Gaming Hub and OMEN Light
+Studio — and none looked expensive. Two of them relaunched at every boot as **packaged
+background tasks via `sihost.exe`**, so disabling their scheduled tasks achieved nothing;
+the only fix that held was the per-app **Background apps permission → Never**, which a
+vendor update can silently switch back on. That is what the GPU watch exists to catch.
 
-The two OMEN ones relaunch at every boot as **packaged background tasks via `sihost.exe`**,
-so disabling their scheduled tasks achieves nothing. The only fix that holds is the per-app
-**Background apps permission → Never**, which an OMEN update can silently flip back on.
-That is what the GPU watch panel exists to catch — an 11 W silent regression.
+Two things follow, and both are baked into the code:
 
-Corollary: never reason about power from CPU% . A/B a drain measurement instead.
+- The cost is the GPU wake cost **once**, not the sum over offenders — any single one is
+  enough to hold it awake. An earlier version summed them and badly overstated the total.
+- Never reason about power from CPU%. A/B a drain measurement instead.
 
 ## WinForms traps already hit here — do not reintroduce
 

@@ -14,9 +14,10 @@ namespace PowerDial
     /// Every preset writes the DC / on-battery side only. Plugged-in behaviour is never
     /// touched, which is what kept the tuning safe while it was being measured.
     ///
-    /// Balanced is the configuration that actually measured 6.92 W (6h21m) on this
-    /// machine. Endurance trades responsiveness for the last watt or so; Full speed
-    /// gives the CPU its head while still on battery.
+    /// Balanced is the sensible starting point on any machine. Endurance trades
+    /// responsiveness for the last watt or so; Full speed gives the CPU its head while
+    /// still on battery. Apply one, then watch the power draw chart to see what it did
+    /// here - the numbers differ by hardware.
     /// </summary>
     public static class Presets
     {
@@ -40,7 +41,7 @@ namespace PowerDial
             },
             new Preset {
                 Name = "Balanced",
-                Blurb = "The measured sweet spot - 6.92 W, about 6h20m idle.",
+                Blurb = "The sensible default. Efficient without feeling slow.",
                 Brightness = 30,
                 Values = new Dictionary<string, int> {
                     { "epp", 80 },
@@ -56,7 +57,7 @@ namespace PowerDial
             },
             new Preset {
                 Name = "Full speed",
-                Blurb = "Unrestricted CPU while on battery. Expect roughly half the runtime.",
+                Blurb = "Unrestricted CPU while on battery. Expect much shorter runtime.",
                 Brightness = 60,
                 Values = new Dictionary<string, int> {
                     { "epp", 50 },

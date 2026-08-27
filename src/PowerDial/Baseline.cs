@@ -25,26 +25,16 @@ namespace PowerDial
     /// so "Restore my settings" always has somewhere to go back to.
     ///
     /// The snapshot is taken the first time the app runs. Because the app writes nothing
-    /// until a control is used, that first-run state IS the pre-app state. If the capture
-    /// ever fails, the seed below is the configuration verified by hand during the tuning
-    /// session that produced 6.92 W.
+    /// until a control is used, that first-run state IS the pre-app state. If no snapshot
+    /// exists there is nothing to restore to, and the app says so rather than applying
+    /// settings taken from some other machine.
     /// </summary>
     public static class Baseline
     {
-        /// <summary>Hand-verified end-of-tuning state. Null value = the setting had no
-        /// stored battery value and was inheriting a Windows default.</summary>
-        static readonly BaselineEntry[] Seed = {
-            new BaselineEntry { Key = "epp",           Value = 80,    WasExplicit = true  },
-            new BaselineEntry { Key = "cpumax",        Value = 100,   WasExplicit = false },
-            new BaselineEntry { Key = "cpumin",        Value = 5,     WasExplicit = false },
-            new BaselineEntry { Key = "boost",         Value = 2,     WasExplicit = false },
-            new BaselineEntry { Key = "videoidle",     Value = 180,   WasExplicit = true  },
-            new BaselineEntry { Key = "sleepidle",     Value = 600,   WasExplicit = true  },
-            new BaselineEntry { Key = "hibernateidle", Value = 10800, WasExplicit = true  },
-            new BaselineEntry { Key = "lid",           Value = 1,     WasExplicit = true  },
-            new BaselineEntry { Key = "switchable",    Value = 0,     WasExplicit = true  },
-            new BaselineEntry { Key = "pcie",          Value = 2,     WasExplicit = false },
-        };
+        // There is deliberately no built-in fallback table. An earlier version carried
+        // one laptop's settings as a seed, which would have restored a stranger's
+        // configuration onto any other machine. If no snapshot exists there is nothing
+        // to restore to, and the app says so.
 
         public static string Folder
         {
@@ -115,8 +105,8 @@ namespace PowerDial
             {
                 CapturedUtc = "(none)",
                 Scheme = PowerCfg.ActiveScheme(),
-                Source = "built-in: the settings verified by hand during the tuning session",
-                Entries = new List<BaselineEntry>(Seed)
+                Source = "no restore point has been captured on this PC yet",
+                Entries = new List<BaselineEntry>()
             };
         }
 

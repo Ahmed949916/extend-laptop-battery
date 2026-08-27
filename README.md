@@ -1,11 +1,16 @@
 # PowerDial
 
-A tray app for controlling the power settings that actually affect battery life on this
-laptop (HP OMEN 16-c0xxx, Ryzen 7 5800H + RTX 3050 Ti), with presets, per-setting
-explanations, a live watts readout, and a one-click way back to how things were.
+A tray app for controlling the power settings that actually affect battery life, with
+presets, per-setting explanations, a live watts readout, process telemetry, and a one-click
+way back to how things were.
 
-Every value and every cost figure in this app came from measuring **this** machine, not
-from documentation.
+It runs on **any Windows 10 or 11 PC** - gaming laptop, ultrabook or desktop - and adapts
+to what it finds. Nothing about the hardware is assumed: the battery, the GPUs, which
+settings exist and whether the display brightness can be controlled are all detected, and
+anything that has to be measured stays blank until it has been measured **here**. You will
+never see a watt figure borrowed from someone else's machine.
+
+On a desktop the battery panels stand down and the rest carries on.
 
 ## Run it
 
@@ -69,7 +74,7 @@ section rather than removed.
 **An info icon on every setting and every section**, explaining in plain terms what it
 does, what it costs, and which figures were measured rather than assumed.
 
-**Analytics.** All of it measured on this machine, and written to disk so it survives
+**Analytics.** All of it measured on your own machine, and written to disk so it survives
 restarts rather than starting from nothing each launch:
 
 - *Power draw* - the raw trace, one point a minute, with a dashed running average.
@@ -93,24 +98,30 @@ for a month of continuous use, pruned after three months.
 
 There are deliberately **no modelled analytics**. An earlier version drew predicted
 runtime-versus-brightness curves from three hardcoded workload constants; it was removed
-because it described a laptop in the abstract instead of this one, now.
+because it described a laptop in the abstract instead of the one in front of you, now.
 
-**Discrete GPU watch.** The most useful part. An awake-but-idle RTX 3050 Ti draws **~17 W**
-here while reporting 0% utilisation and 0 MiB allocated — more than the whole rest of the
-system at idle. Three separate things were caught doing it, and none looked expensive in
-Task Manager:
+**Discrete GPU watch.** The most useful part, on any laptop with switchable graphics. An
+awake-but-idle discrete GPU draws anywhere from about 5 W to over 20 W while reporting 0%
+utilisation and 0 MiB allocated — often more than the whole rest of the system at idle, and
+invisible in Task Manager. The watch looks for the software that holds it awake: vendor
+overlays and capture (NVIDIA, AMD, Intel), the maker's gaming suite (HP, ASUS, Lenovo, MSI,
+Acer, Dell/Alienware) and peripheral lighting engines (Razer, Corsair, Logitech,
+SteelSeries). Graphics-vendor tools are only flagged when they belong to the *discrete* GPU,
+so Radeon Software driving integrated graphics is not blamed for an NVIDIA card.
 
-| Culprit | Measured cost |
-|---|---|
-| NVIDIA Instant Replay / overlay | ~11.8 W |
-| OMEN Command Center background | ~11.1 W |
-| OMEN Light Studio background (the RGB engine) | ~12.0 W |
+On a desktop, or a laptop with one GPU, it says so and stands down — there is no wake cost
+to avoid.
 
-The two OMEN ones relaunch at boot as *packaged background tasks* via `sihost.exe`, so
-disabling their scheduled tasks does nothing. The load-bearing fix is the per-app
-**Background apps permission → Never**, which an OMEN update can silently flip back on.
-Hence the watch: it re-checks the processes, both permissions, and the ShadowPlay flags,
-and totals up the waste.
+The worked example is the laptop this was written on: an RTX 3050 Ti held awake at ~17 W by
+three separate things at once — NVIDIA Instant Replay, OMEN Gaming Hub and OMEN Light
+Studio. Two relaunched at every boot as *packaged background tasks* via `sihost.exe`, so
+disabling their scheduled tasks did nothing; the fix that held was the per-app **Background
+apps permission → Never**, which a vendor update can silently flip back on. That is why the
+watch re-checks processes, permissions and capture flags every poll.
+
+The cost shown is the wake cost **once**, not the sum over offenders — any single one is
+enough to keep the GPU up. Until that cost has been measured on your PC, the panel names
+the culprits and says the cost is not yet measured, rather than borrowing a number.
 
 ## Design notes
 
@@ -127,8 +138,7 @@ are ones Windows hides from its own Power Options UI.
 disagrees, the activity log says so and shows what it actually reads.
 
 **Elevation is `asInvoker`, deliberately.** Most of what this writes (EPP, brightness)
-succeeds unelevated on this machine, so demanding a UAC prompt at every launch would be
-gratuitous. Anything that does need admin reports it and offers **Run as admin**.
+succeeds unelevated, so demanding a UAC prompt at every launch would be gratuitous. Anything that does need admin reports it and offers **Run as admin**.
 
 **Nothing is written just by running it.** Verified: launching the app leaves every
 registry value untouched until a control is used.
@@ -179,13 +189,15 @@ and paint the GPU section twice.
 
 | File | |
 |---|---|
-| `PowerCfg.cs` | the ten settings, registry reads, `powercfg` writes, info text |
+| `Machine.cs` | hardware detection: battery, GPUs, form factor, capabilities |
+| `Config.cs` | per-machine measured values, persisted |
+| `PowerCfg.cs` | the settings, registry reads, `powercfg` writes, info text |
 | `Battery.cs` | WMI battery sampling and the watts calculation |
 | `Brightness.cs` | WMI backlight get/set |
 | `GpuWatch.cs` | discrete-GPU waker detection |
 | `Baseline.cs` | the restore point |
 | `Presets.cs` | the three profiles |
-| `Charts.cs` | the charts, the process table, and the one measured constant |
+| `Charts.cs` | the charts and the process table |
 | `ProcessWatch.cs` | live per-process CPU and memory sampling |
 | `History.cs` | the on-disk record and the cumulative per-process tally |
 | `Theme.cs` | palette, type, drawing helpers |
@@ -206,8 +218,11 @@ expanded states to PNGs.
 
 ## Known limits
 
-- Tuned for one machine. The GPU cost figures, the 0.04 W-per-brightness-point constant,
-  and `OriginalDesignMwh = 70562` are all specific to this laptop.
+- Some figures have to be measured on your hardware before they can be shown: the backlight
+  cost per brightness point, and what an awake discrete GPU costs. Until then those panels
+  say so instead of guessing.
+- Discrete-versus-integrated GPU detection is a heuristic based on the adapter name. It is
+  right on every common part but could mislabel something unusual.
 - The watts figure needs a full window, and reads high at low charge, where a degraded
   pack's internal resistance inflates measured drain relative to actual consumption.
 - It cannot fix the background-app permissions itself — that is a UWP permission, not a

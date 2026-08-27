@@ -6,20 +6,6 @@ using System.Windows.Forms;
 
 namespace PowerDial
 {
-    /// <summary>
-    /// The one constant worth keeping: the backlight cost, measured on this panel by
-    /// holding everything else still (12.00 W at 99% against 9.24 W at 30%). It is applied
-    /// to the live reading to split the current draw, not used to predict anything.
-    ///
-    /// The old modelled runtime curves lived here and have been removed. They described a
-    /// laptop in the abstract; everything on screen now comes from this machine, now.
-    /// </summary>
-    public static class Model
-    {
-        public const double WattsPerPoint = 0.04;
-        public static double Backlight(int brightness) { return brightness * WattsPerPoint; }
-    }
-
     /// <summary>Watts over time, with min / average / max called out.</summary>
     public class LineChart : Control
     {

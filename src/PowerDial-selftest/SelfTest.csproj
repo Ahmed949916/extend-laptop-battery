@@ -10,9 +10,13 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\PowerDial\PowerCfg.cs" />
+    <Compile Include="..\PowerDial\Machine.cs" />
+    <Compile Include="..\PowerDial\Config.cs" />
     <Compile Include="..\PowerDial\Battery.cs" />
     <Compile Include="..\PowerDial\Brightness.cs" />
     <Compile Include="..\PowerDial\GpuWatch.cs" />
+    <Compile Include="..\PowerDial\ProcessWatch.cs" />
+    <Compile Include="..\PowerDial\Advisor.cs" />
     <Compile Include="..\PowerDial\Presets.cs" />
     <Compile Include="SelfTest.cs" />
   </ItemGroup>

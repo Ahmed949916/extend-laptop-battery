@@ -1,0 +1,17 @@
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.csproj.AssemblyReference.cache
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.AssemblyInfoInputs.cache
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.AssemblyInfo.cs
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.csproj.CoreCompileInputs.cache
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\SelfTest.exe
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\SelfTest.deps.json
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\SelfTest.runtimeconfig.json
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\SelfTest.dll
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\System.CodeDom.dll
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\System.Management.dll
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\bin\Release\net6.0-windows\runtimes\win\lib\net6.0\System.Management.dll
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.csproj.CopyComplete
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.dll
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\refint\SelfTest.dll
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\SelfTest.genruntimeconfig.cache
+C:\Users\hp\OneDrive\Desktop\control-battery\src\PowerDial-selftest\obj\Release\net6.0-windows\ref\SelfTest.dll

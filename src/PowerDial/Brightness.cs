@@ -4,15 +4,13 @@ using System.Management;
 namespace PowerDial
 {
     /// <summary>
-    /// Panel backlight, via WMI. Measured cost on this machine: 0.04 W per percentage
-    /// point, i.e. about 4 W across the full range - which at idle is over half the
-    /// total draw, making this the single biggest thing the user controls directly.
-    /// Does not require elevation.
+    /// Panel backlight, via WMI. Not available everywhere - plenty of desktops and
+    /// external monitors do not expose it, so Machine.BrightnessControllable says
+    /// whether this PC does. The watts-per-point cost lives in Config, measured per
+    /// display rather than assumed. Does not require elevation.
     /// </summary>
     public static class Brightness
     {
-        public const double WattsPerPoint = 0.04;
-
         public static int? Get()
         {
             try

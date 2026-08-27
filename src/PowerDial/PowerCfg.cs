@@ -48,21 +48,22 @@ namespace PowerDial
                 Key = "epp", Label = "Energy performance preference",
                 SubGroup = SUB_PROCESSOR, Guid = "36687f9e-e3a5-4dbf-b1dc-15eb381c6863",
                 Min = 0, Max = 100, Unit = "%", Hidden = true,
-                Note = "The best single lever. 0 = all performance, 100 = all efficiency.",
+                Note = "Usually the best single lever. 0 = all performance, 100 = all efficiency.",
                 Info = "Tells the CPU how hard to chase speed. Low numbers make it jump to high clocks eagerly; " +
                        "high numbers make it settle for slower, far more efficient ones. It is a hint rather than " +
                        "a cap, so full speed is still available when something genuinely needs it.\n\n" +
-                       "Measured here: moving this from 50 to 80 saved about 3 W, roughly an extra hour and a " +
-                       "quarter of runtime. Best value of anything on this page, and nothing felt slower after.\n\n" +
-                       "Try 70 if 80 ever feels sluggish."
+                       "On many laptops this is worth more than everything else here combined, and costs " +
+                       "little in responsiveness. Windows often leaves it near the middle on battery.\n\n" +
+                       "Raise it, then watch the power draw chart for a minute to see what it actually " +
+                       "bought you on this machine. Back off to 70 if 80 feels sluggish."
             },
             new Knob {
                 Key = "cpumax", Label = "Maximum processor speed",
                 SubGroup = SUB_PROCESSOR, Guid = "bc5038f7-23e0-4960-96da-33abaf5935ec",
                 Min = 20, Max = 100, Unit = "%",
                 Note = "A hard ceiling. 99% switches boost off completely.",
-                Info = "A hard limit on clock speed, measured against the CPU base clock of 3.2 GHz. Anything " +
-                       "above 100% is boost territory, so 99% locks boost out entirely.\n\n" +
+                Info = "A hard limit on clock speed, expressed against this CPU base clock. Anything above " +
+                       "100% is boost territory, so 99% locks boost out entirely.\n\n" +
                        "This is the blunt version of Energy performance preference. It removes boost even for " +
                        "brief bursts, where boost is often the efficient choice: finishing quickly lets the CPU " +
                        "go back to sleep sooner.\n\n" +
@@ -87,13 +88,13 @@ namespace PowerDial
                     { 3, "Efficient, conservative" }, { 4, "Efficient, aggressive" },
                     { 5, "Aggressive up to base clock" }, { 6, "Efficient, aggressive up to base clock" }
                 },
-                Note = "Windows defaults this to Aggressive on battery, the hungriest option.",
+                Note = "Windows often defaults this to Aggressive on battery, the hungriest option.",
                 Info = "Controls how eagerly the CPU enters turbo and how long it stays there. The Efficient " +
                        "options hand that decision to the chip's own logic instead of Windows pushing for " +
                        "maximum clocks.\n\n" +
-                       "On battery this machine defaults to Aggressive, the most power-hungry of the seven. " +
-                       "Efficient, aggressive keeps burst responsiveness while stopping the CPU parking at " +
-                       "high clocks.\n\n" +
+                       "Aggressive is the most power-hungry of the seven and a common default on battery. " +
+                       "Efficient, aggressive keeps burst responsiveness while stopping the CPU parking " +
+                       "at high clocks.\n\n" +
                        "Change the preference slider first, and measure before stacking this on top."
             },
             new Knob {
@@ -103,14 +104,13 @@ namespace PowerDial
                     { 0, "Always use the efficient GPU" }, { 1, "Prefer the efficient GPU" },
                     { 2, "Prefer performance" }, { 3, "Always use the fast GPU" }
                 },
-                Note = "Unproven on this laptop. Measure before trusting it.",
-                Info = "Asks Windows to steer work towards the built-in AMD graphics rather than the NVIDIA " +
-                       "card. The built-in GPU handles browsing and video for a fraction of the power, and it " +
-                       "already does all the rendering here.\n\n" +
-                       "Be sceptical of this one. It comes from the AMD driver and its effect on an NVIDIA card " +
-                       "was never demonstrated on this machine. If a before-and-after measurement shows nothing, " +
-                       "put it back. No point carrying a setting that does nothing.\n\n" +
-                       "What genuinely controls the NVIDIA card is the GPU watch section."
+                Note = "Effect varies by machine. Measure before trusting it.",
+                Info = "Asks Windows to steer work towards the integrated GPU rather than the discrete one. " +
+                       "Integrated graphics handle browsing and video for a fraction of the power.\n\n" +
+                       "Be sceptical of this one. It is supplied by the graphics driver, and its effect on " +
+                       "a discrete card from another vendor is not guaranteed. Change it, watch the power " +
+                       "draw chart, and put it back if nothing moves.\n\n" +
+                       "The GPU watch section is what actually catches a discrete GPU held awake."
             },
 
             // ---- basic: timeouts and behaviour. None of these change draw while you work ----
@@ -129,9 +129,9 @@ namespace PowerDial
                 SubGroup = SUB_SLEEP, Guid = "29f6c1db-86da-48c5-9fdb-f2b67b1f44da",
                 Min = 0, Max = 7200, Unit = "s", Basic = true,
                 Note = "Idle timeout, not a power setting.",
-                Info = "How long before an untouched laptop goes to sleep. This machine uses old-style S3 sleep " +
-                       "rather than Modern Standby, which is good news: sleep here is genuinely low power rather " +
-                       "than a background doze.\n\n" +
+                Info = "How long before an untouched machine goes to sleep. Older S3 sleep is genuinely low " +
+                       "power; Modern Standby keeps working in the background and drains more. Run " +
+                       "powercfg /a from a terminal to see which this PC uses.\n\n" +
                        "Set to 0 it never sleeps, which is how a laptop ends up flat in a bag."
             },
             new Knob {
@@ -150,10 +150,10 @@ namespace PowerDial
                 Choices = new Dictionary<int, string> {
                     { 0, "Do nothing" }, { 1, "Sleep" }, { 2, "Hibernate" }, { 3, "Shut down" }
                 },
-                Note = "Was set to Do nothing, which is how a laptop cooks itself in a bag.",
-                Info = "What happens when you shut the lid. This was set to Do nothing, meaning the machine kept " +
-                       "running with the screen off. Closed in a bag it would run until the battery died, getting " +
-                       "hot the whole time.\n\n" +
+                Note = "Set to Do nothing, a laptop runs itself flat in a closed bag.",
+                Info = "What happens when you shut the lid. Set to Do nothing, the machine keeps running with " +
+                       "the screen off - closed in a bag it runs until the battery dies, getting hot the " +
+                       "whole time. Worth checking, because it is a common default.\n\n" +
                        "Sleep is the right answer unless you deliberately run it lid-closed on an external monitor."
             },
             new Knob {
@@ -163,12 +163,27 @@ namespace PowerDial
                 Choices = new Dictionary<int, string> {
                     { 0, "Off" }, { 1, "Moderate" }, { 2, "Maximum" }
                 },
-                Note = "Already at maximum. Nothing to gain here.",
-                Info = "Lets the internal expansion bus idle down between transfers. It is already at Maximum on " +
-                       "battery, which is the best setting, so changing it can only make things worse.\n\n" +
+                Note = "Usually already at maximum, in which case there is nothing to gain.",
+                Info = "Lets the internal expansion bus idle down between transfers. Maximum is the best " +
+                       "setting for battery life and is often already selected, in which case changing " +
+                       "it can only make things worse.\n\n" +
                        "Shown for completeness rather than because it needs attention."
             },
         };
+
+        /// <summary>True when Windows actually defines this setting on this PC. The
+        /// switchable-graphics group in particular only exists on some hybrid systems,
+        /// so rows for settings that are not there get dropped rather than shown dead.</summary>
+        public static bool Exists(Knob k)
+        {
+            try
+            {
+                using (RegistryKey r = Registry.LocalMachine.OpenSubKey(
+                           SettingsRoot + "\\" + k.SubGroup + "\\" + k.Guid))
+                    return r != null;
+            }
+            catch { return false; }
+        }
 
         public static Knob Find(string key)
         {

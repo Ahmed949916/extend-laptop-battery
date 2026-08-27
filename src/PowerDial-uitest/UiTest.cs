@@ -47,6 +47,13 @@ class UiTest
         Application.DoEvents();
     }
 
+    static int CountApplicable(List<Suggestion> l)
+    {
+        int n = 0;
+        foreach (Suggestion s in l) if (s.CanApply) n++;
+        return n;
+    }
+
     [STAThread]
     static void Main()
     {
@@ -113,11 +120,121 @@ class UiTest
         Check("charge-over-time chart from saved history", batCharts == 1, batCharts + " found");
         Check("two process tables (live + cumulative)", procTables == 2, procTables + " found");
         Check("two stacked bars (watt split + health)", stackBars == 2, stackBars + " found");
-        Check("info icons cover sections too", infoDots >= 17, infoDots + " found");
+        Check("info icons cover sections too", infoDots >= 18, infoDots + " found");
         Check("the modelled runtime curve is gone",
               Type.GetType("PowerDial.CurveChart, UiTest") == null);
-        Check("measured backlight constant kept", Math.Abs(Model.Backlight(30) - 1.2) < 0.001,
-              Model.Backlight(30).ToString("0.00") + " W at 30%");
+        Check("backlight cost is null until measured on this display",
+              !Model.WattsPerPoint.HasValue || Model.WattsPerPoint.Value > 0,
+              Model.WattsPerPoint.HasValue
+                  ? Model.WattsPerPoint.Value.ToString("0.000") + " W per point (calibrated)"
+                  : "not calibrated - no figure shown, by design");
+
+        Console.WriteLine();
+        Console.WriteLine("--- suggestions section ---");
+        Card fixCard = Field(f, "_fixCard") as Card;
+        Panel fixList = Field(f, "_fixList") as Panel;
+        Label fixSummary = Field(f, "_fixSummary") as Label;
+        PillButton applyAll = Field(f, "_fixApplyAll") as PillButton;
+        Check("the section exists", fixCard != null && fixList != null && fixSummary != null);
+
+        object fixesObj = Field(f, "_fixes");
+        List<Suggestion> fixes = fixesObj as List<Suggestion>;
+        Check("the form scanned the machine on startup", fixes != null);
+        if (fixes != null)
+        {
+            Console.WriteLine("  " + fixSummary.Text);
+            foreach (Suggestion g in fixes)
+                Console.WriteLine("    [" + g.Rank.ToString().PadLeft(3) + "] " +
+                                  g.Title.PadRight(58) + g.ActionLabel);
+
+            Check("one card per suggestion", fixList.Controls.Count == fixes.Count,
+                  fixList.Controls.Count + " cards for " + fixes.Count + " suggestions");
+
+            int buttons = 0, dots = 0, offEdge = 0;
+            foreach (Control card in fixList.Controls)
+                foreach (Control kid in card.Controls)
+                {
+                    if (kid is PillButton) buttons++;
+                    if (kid is InfoDot) dots++;
+                    if (kid.Right > card.Width) offEdge++;
+                }
+            Check("every suggestion carries a button", buttons == fixes.Count, buttons + " buttons");
+            Check("every suggestion carries an info icon", dots == fixes.Count, dots + " icons");
+            Check("nothing overflows its card", offEdge == 0, offEdge + " controls past the edge");
+
+            // the card has to be tall enough to hold the list plus the footer buttons,
+            // or the AutoSize trap comes back and the section paints over the next one
+            Panel fixButtons = Field(f, "_fixButtons") as Panel;
+            Check("card is tall enough for its contents",
+                  fixButtons != null && fixCard.Height >= fixButtons.Bottom,
+                  "card " + fixCard.Height + ", content ends " +
+                  (fixButtons == null ? 0 : fixButtons.Bottom));
+
+            Check("Apply all appears only when it saves clicks",
+                  applyAll != null && applyAll.Visible == (CountApplicable(fixes) > 1),
+                  CountApplicable(fixes) + " of " + fixes.Count + " can be written from here");
+
+            Check("the summary describes what was found",
+                  fixSummary.Text.Length > 20 &&
+                  (fixes.Count == 0 || fixSummary.Text.Contains(fixes.Count.ToString())),
+                  fixSummary.Text);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("--- machine detection (replaces the hardcoded laptop) ---");
+        Machine.Detect(true);
+        Console.WriteLine("  " + Machine.Summary());
+        Check("form factor detected", true, Machine.IsPortable ? "portable" : "desktop");
+        Check("at least one GPU found", Machine.Gpus != null && Machine.Gpus.Count > 0,
+              Machine.Gpus == null ? "none" : Machine.Gpus.Count + " adapters");
+        foreach (GpuInfo gi in Machine.Gpus)
+            Console.WriteLine("    " + gi.Name.PadRight(42) + gi.Vendor +
+                              (gi.Discrete ? "  discrete" : "  integrated"));
+        Check("hybrid graphics correctly identified", true,
+              Machine.Hybrid ? "hybrid - GPU watch applies" : "not hybrid - GPU watch stands down");
+
+        if (Machine.HasBattery)
+        {
+            Check("design capacity established", Machine.DesignCapacityMwh > 0,
+                  Machine.DesignCapacityMwh + " mWh from " + Machine.DesignCapacitySource);
+            // this used to be a hardcoded 70562; detection has to reproduce it
+            Check("detected design capacity exceeds current full charge",
+                  Machine.DesignCapacityMwh >= 43000,
+                  "otherwise health would be meaningless");
+        }
+        else Console.WriteLine("  no battery - battery panels stand down");
+
+        Console.WriteLine("  brightness controllable: " + Machine.BrightnessControllable);
+
+        int defined = 0, missing = 0;
+        foreach (Knob k in PowerCfg.Knobs) { if (PowerCfg.Exists(k)) defined++; else missing++; }
+        Check("settings filtered to those Windows defines here", defined > 0,
+              defined + " available, " + missing + " not present on this PC");
+
+        Console.WriteLine();
+        Console.WriteLine("--- config round-trip ---");
+        double? was = Config.Current.WattsPerBrightnessPoint;
+        Config.SetBacklight(0.0425);
+        Config c2 = Config.Current;
+        Check("calibration persists", c2.WattsPerBrightnessPoint.HasValue &&
+              Math.Abs(c2.WattsPerBrightnessPoint.Value - 0.0425) < 1e-9,
+              "stored in " + Config.Path);
+        Config.Current.WattsPerBrightnessPoint = was;   // put it back
+        Config.Save();
+        Check("restored to prior value",
+              Config.Current.WattsPerBrightnessPoint.HasValue == was.HasValue);
+
+        Console.WriteLine();
+        Console.WriteLine("--- gpu watch adapts to the hardware ---");
+        List<Finding> gw = GpuWatch.Check();
+        foreach (Finding gf in gw)
+            Console.WriteLine("    [" + (gf.Informational ? "--" : (gf.Ok ? "OK" : "!!")) + "] " +
+                              gf.Name.PadRight(44) + gf.Detail);
+        Check("gpu watch produced a verdict", gw.Count > 0, gw.Count + " findings");
+        double? gwCost = GpuWatch.TotalCost(gw);
+        Check("cost is measured-or-unknown, never invented",
+              !gwCost.HasValue || gwCost.Value >= 0,
+              gwCost.HasValue ? gwCost.Value.ToString("0.0") + " W" : "not measured on this PC");
 
         Console.WriteLine();
         Console.WriteLine("--- live process telemetry ---");

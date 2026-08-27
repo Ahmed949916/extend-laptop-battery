@@ -155,6 +155,14 @@ measurement. The signature is the **sparkline**: this whole exercise was about w
 number move over a window rather than trusting a spec, so the header shows the real recent
 history instead of a lone digit.
 
+The header is **pinned**, and under the trace it carries the figure the live reading cannot
+give you: the average draw actually recorded on this machine, and how long a full charge
+lasts at it. The 60-second number answers "what am I drawing this minute" and swings by
+several watts as the CPU breathes; the average answers "how long does this thing last".
+Both are measurements — see `Runtime.cs` — and the band says how many recorded minutes it
+is standing on, so a four-minute average cannot pass itself off as a runtime estimate.
+Below it, a bar of section buttons scrolls the column; nothing is hidden behind a tab.
+
 Every interactive control is custom-drawn, because stock Win32 widgets cannot be made to
 look like this and, in the case of `TrackBar`, actively misbehave (see below).
 
@@ -201,6 +209,7 @@ and paint the GPU section twice.
 | `Charts.cs` | the charts and the process table |
 | `ProcessWatch.cs` | live per-process CPU and memory sampling |
 | `History.cs` | the on-disk record and the cumulative per-process tally |
+| `Runtime.cs` | the measured average draw, and the runtime it implies |
 | `Theme.cs` | palette, type, drawing helpers |
 | `Widgets.cs` | Card, PillButton, Slider, Picker, InfoDot, SectionToggle, Sparkline, SteadyPanel |
 | `MainForm.cs` | window and readout |

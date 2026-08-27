@@ -24,6 +24,7 @@
     <Compile Include="..\PowerDial\Charts.cs" />
     <Compile Include="..\PowerDial\ProcessWatch.cs" />
     <Compile Include="..\PowerDial\History.cs" />
+    <Compile Include="..\PowerDial\Runtime.cs" />
     <Compile Include="..\PowerDial\MainForm.cs" />
     <Compile Include="UiTest.cs" />
   </ItemGroup>

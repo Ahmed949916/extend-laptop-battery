@@ -47,6 +47,14 @@ class UiTest
         Application.DoEvents();
     }
 
+    static void ScrollTo(Control panel, int y)
+    {
+        ScrollableControl sc = panel as ScrollableControl;
+        if (sc == null) return;
+        sc.AutoScrollPosition = new Point(0, y);
+        Application.DoEvents();
+    }
+
     static int CountApplicable(List<Suggestion> l)
     {
         int n = 0;
@@ -381,12 +389,26 @@ class UiTest
         {
             Shoot(f, System.IO.Path.Combine(outDir, "ui-collapsed.png"), 1180);
             Shoot(f, System.IO.Path.Combine(outDir, "ui-full.png"), 3100);
+
+            // DrawToBitmap will not render past roughly the screen height, so a single
+            // tall shot of the whole column comes back mostly blank. Capture it as
+            // screen-sized slices instead, which is also how anyone actually sees it.
+            Control col = f.Controls[0];
+            int slice = 0;
+            for (int y = 0; y < 3200; y += 900)
+            {
+                ScrollTo(col, y);
+                Shoot(f, System.IO.Path.Combine(outDir, "ui-scroll" + slice + ".png"), 1000);
+                slice++;
+            }
+            ScrollTo(col, 0);
+
             basicToggle.Toggle();
             Application.DoEvents();
             Shoot(f, System.IO.Path.Combine(outDir, "ui-expanded.png"), 1700);
             basicToggle.Toggle();
             Application.DoEvents();
-            Console.WriteLine("  wrote ui-collapsed.png and ui-expanded.png");
+            Console.WriteLine("  wrote ui-collapsed.png, ui-expanded.png and " + slice + " scroll slices");
         }
         Console.WriteLine();
 

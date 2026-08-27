@@ -139,6 +139,20 @@ described a laptop in the abstract rather than the one in front of you. What rep
 this PC or `null` — and is applied to the live reading to split the current draw, not to
 predict one. Do not reintroduce modelled numbers as analytics.
 
+**`RuntimeAverage` is not a model either, and the distinction matters.** `Runtime.cs` takes
+the recorded points, keeps the ones that were on battery and actually drawing, and divides
+the capacity the pack holds *now* by the mean of those measured watts. Every input is a
+measurement from this machine; there is no workload constant and nothing is extrapolated.
+It exists because the 60-second reading answers "what am I drawing this minute", which
+swings by several watts as the CPU breathes, while the question people actually have is
+"how long does this thing last". Two rules keep it honest:
+
+- **`Minutes` travels with the figure and is shown.** An average over four recorded minutes
+  is not a runtime estimate, and the header says what it is standing on.
+- **The spread is the 10th and 90th percentile, not min and max.** One spiky minute should
+  not become "your best case". `Low`/`High` are deliberately robust, and when nothing has
+  been recorded on battery the band reads *not measured yet* rather than showing zero.
+
 ## Portability rules
 
 - **Never reintroduce a hardware constant.** If a number varies by machine it belongs in
@@ -189,6 +203,31 @@ Two things follow, and both are baked into the code:
   once, reuse. Poll every 15 s against the 60 s window. Now ~0.16%.
 - **`"0.1"` is not a one-decimal format string** in .NET — only `0` and `#` are digit
   placeholders. It rendered 43.905 as "441". Use `"0.0"`.
+- **Docking a Fill panel next to a Top panel depends on z-order**, which is easy to get
+  backwards and silently paints one over the other. The header and the scroll column use
+  explicit bounds plus `Anchor` instead, so the order they are added to `Controls` decides
+  nothing about layout. It still decides `Controls[0]`, which the UI test reads as the
+  scroll column — so **`_root` must be added to the form first**.
+- **A `FlowLayoutPanel` ignores `Anchor` on its own children.** Cards are therefore given a
+  width explicitly by `Relayout`; the controls *inside* each card are anchored and follow on
+  their own. Buttons are skipped — stretching *Run as admin* across the column made it look
+  like the primary action.
+
+## The window
+
+One scrolling column, about three screens long, with two things pinned above it in
+`_chrome`: the header instrument and a bar of section buttons.
+
+- **The header does not scroll.** Draw, what is left, charge, health and the measured
+  average are why the app is open; they used to leave the screen within one flick of the
+  wheel, so you could not see the effect of the control you had just moved.
+- **The section bar only moves you.** It scrolls the column — nothing is hidden behind a
+  tab. That is partly principle and partly the test suite: it toggles *Basic settings* and
+  asserts `Visible` flips, and `Control.Visible` is false whenever an ancestor is hidden, so
+  putting sections on separate pages would break it. Keep every section on the one page.
+- **`Relayout` stretches the design width to the window** and caps the column at `WMax`; a
+  chart three thousand pixels wide is wider, not clearer. Everything is still built once at
+  `W`, so all the geometry arithmetic stays in one place.
 
 ## Editing notes
 

@@ -8,7 +8,12 @@ namespace PowerDial
 {
     public class MainForm : Form
     {
-        const int W = 648;          // content column width
+        // Everything is laid out once at this width, then stretched to the window by
+        // Relayout. Building at a fixed width keeps the arithmetic in one place; the
+        // stretching is carried by Anchor on the children that should grow.
+        const int W = 648;          // design width of the content column
+        const int WMax = 1240;      // past this a chart is wider, not clearer
+        const int Chrome = 14;      // gutter either side of the column
 
         class Row
         {
@@ -30,6 +35,11 @@ namespace PowerDial
         int? _pendingBrightness;
 
         SteadyPanel _root;
+        Panel _chrome;              // header + section bar, pinned above the scroll area
+        Panel _navBar;
+        readonly List<PillButton> _navBtns = new List<PillButton>();
+        readonly List<Control> _navTargets = new List<Control>();
+        readonly Dictionary<string, Control> _sections = new Dictionary<string, Control>();
         Readout _readout;
         Sparkline _spark;
         Slider _brightSlider;
@@ -57,6 +67,7 @@ namespace PowerDial
 
         readonly ProcessWatch _procWatch = new ProcessWatch();
         List<ProcInfo> _procs = new List<ProcInfo>();
+        RuntimeAverage _avg = new RuntimeAverage();
         bool _sortCpu;
         bool _bgOnly = true;
         DateTime _lastHistory = DateTime.MinValue;
@@ -73,7 +84,7 @@ namespace PowerDial
             ForeColor = Theme.Text;
             Font = Theme.Body;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(W + 34, 860);
+            ClientSize = new Size(980, 900);
             MinimumSize = new Size(W + 34, 520);
             Icon = MakeIcon();
             DoubleBuffered = true;
@@ -151,12 +162,16 @@ namespace PowerDial
         {
             base.OnShown(e);
 
-            // Pin the window to the content column. Something in the flow layout was
-            // letting it open full-screen, which left a huge empty gutter to the right.
+            // Open at a size that suits the screen rather than a fixed column. The column
+            // itself is still capped by Relayout - a chart three thousand pixels wide is
+            // no clearer - but the window no longer opens as a strip on a large display.
             if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
-            int maxH = Screen.FromControl(this).WorkingArea.Height - 90;
-            ClientSize = new Size(W + 34, Math.Min(880, Math.Max(520, maxH)));
+            Rectangle work = Screen.FromControl(this).WorkingArea;
+            int maxH = work.Height - 90;
+            int wantW = Math.Min(WMax + 34, Math.Max(W + 34, (int)(work.Width * 0.62)));
+            ClientSize = new Size(wantW, Math.Min(940, Math.Max(520, maxH)));
             CenterToScreen();
+            Relayout();
 
             // AutoScroll parks itself on whichever control takes focus, which pushed the
             // header card above the fold. Resetting inline is too early - the flow panel
@@ -172,30 +187,48 @@ namespace PowerDial
         protected override void OnClientSizeChanged(EventArgs e)
         {
             base.OnClientSizeChanged(e);
-            if (_root == null) return;
-            // keep the column centred if the window is dragged or snapped wider
-            int extra = Math.Max(0, ClientSize.Width - (W + 34));
-            _root.Padding = new Padding(14 + extra / 2, 14, 6, 20);
+            Relayout();
         }
 
         // ================================================================= layout
 
         void BuildUi()
         {
+            // _root is added first on purpose: the UI test reads Controls[0] as the
+            // scrolling column, and checks the spacer is its bottom-most child. Neither
+                // panel is docked - explicit bounds plus Anchor means dock ordering, which
+            // is z-order dependent and easy to get backwards, never enters into it.
             _root = new SteadyPanel {
-                Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false,
-                AutoScroll = true, BackColor = Theme.Ink, Padding = new Padding(14, 14, 6, 20)
+                FlowDirection = FlowDirection.TopDown, WrapContents = false,
+                AutoScroll = true, BackColor = Theme.Ink, Padding = new Padding(Chrome, 12, 6, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
             Controls.Add(_root);
 
+            _chrome = new Panel {
+                Location = new Point(0, 0), BackColor = Theme.Ink,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            Controls.Add(_chrome);
+
             // ---------------------------------------------------------- header
-            _readout = new Readout { Width = W, Height = 122, Margin = new Padding(0, 0, 0, 12) };
-            _spark = new Sparkline { Location = new Point(16, 74), Size = new Size(W - 32, 34), Ceiling = 16 };
+            // Pinned rather than scrolled. The draw, what is left and the measured
+            // average are the reason the app is open; they used to scroll away within
+            // one flick of the wheel and you had to come back up to read the effect of
+            // whatever you had just changed.
+            _readout = new Readout {
+                Location = new Point(Chrome, 12), Width = W, Height = 170,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _spark = new Sparkline {
+                Location = new Point(16, 72), Size = new Size(W - 32, 28), Ceiling = 16,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
             _readout.Controls.Add(_spark);
-            _root.Controls.Add(_readout);
+            _chrome.Controls.Add(_readout);
 
             // ---------------------------------------------------------- suggestions
-            _root.Controls.Add(Heading("Make it last longer", "what is worth changing on this PC right now",
+            Panel fixHead = Heading("Make it last longer", "what is worth changing on this PC right now",
                 "Everything below is something this app found wrong with how this PC is set up at " +
                 "the moment, sorted by what matters most. It is not a checklist of things you " +
                 "could do - a setting that is already sensible does not appear here at all, so an " +
@@ -209,23 +242,27 @@ namespace PowerDial
                 "shown; where it has not, the order of the list carries the priority instead.\n\n" +
                 "A few things cannot be fixed by writing a setting - background apps and whatever is " +
                 "holding a discrete GPU awake. Those open the Windows page where you do it yourself " +
-                "rather than pretending to be fixed."));
+                "rather than pretending to be fixed.");
+            _root.Controls.Add(fixHead);
 
             _fixCard = new Card { Width = W, Height = 120, Margin = new Padding(0, 0, 0, 12) };
 
             _fixSummary = new Label {
                 Location = new Point(14, 12), Size = new Size(W - 30, 22),
-                Font = Theme.Title, ForeColor = Theme.Save, BackColor = Theme.Panel
+                Font = Theme.Title, ForeColor = Theme.Save, BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _fixCard.Controls.Add(_fixSummary);
 
             _fixList = new Panel {
-                Location = new Point(14, 40), Size = new Size(W - 30, 10), BackColor = Theme.Panel
+                Location = new Point(14, 40), Size = new Size(W - 30, 10), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _fixCard.Controls.Add(_fixList);
 
             _fixButtons = new Panel {
-                Location = new Point(14, 58), Size = new Size(W - 30, 38), BackColor = Theme.Panel
+                Location = new Point(14, 58), Size = new Size(W - 30, 38), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _fixApplyAll = new PillButton {
                 Text = "Apply every fix", Glyph = Theme.GlyphCheck, Location = new Point(0, 3),
@@ -306,7 +343,8 @@ namespace PowerDial
             Card bc = new Card { Width = W, Height = 56, Margin = new Padding(0, 0, 0, 12) };
             _brightSlider = new Slider {
                 Location = new Point(14, 14), Size = new Size(W - 210, 28),
-                Minimum = 0, Maximum = 100, Step = 5, Accent = Theme.Spend
+                Minimum = 0, Maximum = 100, Step = 5, Accent = Theme.Spend,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _brightSlider.ValueChanged += (s, e) => {
                 UpdateBrightLabels();
@@ -317,16 +355,17 @@ namespace PowerDial
             bc.Controls.Add(_brightSlider);
             _brightValue = new Label {
                 Text = "--", Location = new Point(W - 186, 16), Size = new Size(56, 24),
-                Font = Theme.Value, ForeColor = Theme.Text, BackColor = Theme.Panel, TextAlign = ContentAlignment.MiddleRight
+                Font = Theme.Value, ForeColor = Theme.Text, BackColor = Theme.Panel,
+                TextAlign = ContentAlignment.MiddleRight, Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             bc.Controls.Add(_brightValue);
             _brightCost = new Label {
                 Text = "", Location = new Point(W - 124, 20), Size = new Size(74, 18),
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             bc.Controls.Add(_brightCost);
             InfoDot bdot = new InfoDot {
-                Location = new Point(W - 34, 19), Heading = "Screen brightness",
+                Location = new Point(W - 34, 19), Heading = "Screen brightness", Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 Body = "Backlight cost varies by several times between displays, so no figure is shown " +
                        "here until it has been measured on this one.\n\n" +
                        "It matters most when the machine is otherwise idle, because then it is a large " +
@@ -398,16 +437,17 @@ namespace PowerDial
                 Text = "Power draw", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _chartWatts = new LineChart {
-                Location = new Point(14, 32), Size = new Size(W - 30, 118),
+                Location = new Point(14, 32), Size = new Size(W - 30, 118), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Empty = "no samples yet - readings begin after 60 seconds on battery" };
             ac.Controls.Add(_chartWatts);
             ac.Controls.Add(new Label {
                 Text = "Charge over time", Location = new Point(14, 158), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
-            _batChart = new BatteryChart { Location = new Point(14, 180), Size = new Size(W - 30, 104) };
+            _batChart = new BatteryChart {
+                Location = new Point(14, 180), Size = new Size(W - 30, 104), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             ac.Controls.Add(_batChart);
             _histLabel = new Label {
-                Location = new Point(14, 292), Size = new Size(W - 30, 18),
+                Location = new Point(14, 292), Size = new Size(W - 30, 18), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             ac.Controls.Add(_histLabel);
             _root.Controls.Add(ac);
@@ -417,9 +457,9 @@ namespace PowerDial
                 Text = "Running now", Location = new Point(14, 10), Size = new Size(300, 18),
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel };
             pc.Controls.Add(_procLabel);
-            _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 322, 6), Size = new Size(98, 26), Selected = true };
-            _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 218, 6), Size = new Size(80, 26) };
-            _btnBg = new PillButton { Text = "Background", Location = new Point(W - 132, 6), Size = new Size(118, 26), Selected = true };
+            _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 322, 6), Size = new Size(98, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 218, 6), Size = new Size(80, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            _btnBg = new PillButton { Text = "Background", Location = new Point(W - 132, 6), Size = new Size(118, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
             _btnMem.Click += (s, e) => { _sortCpu = false; RefreshProcesses(); };
             _btnCpu.Click += (s, e) => { _sortCpu = true; RefreshProcesses(); };
             _btnBg.Click += (s, e) => { _bgOnly = !_bgOnly; RefreshProcesses(); };
@@ -427,10 +467,10 @@ namespace PowerDial
             pc.Controls.Add(_btnCpu);
             pc.Controls.Add(_btnBg);
             _procTable = new ProcessTable {
-                Location = new Point(14, 40), Size = new Size(W - 30, ProcessTable.RowH * 9 + 22) };
+                Location = new Point(14, 40), Size = new Size(W - 30, ProcessTable.RowH * 9 + 22), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             pc.Controls.Add(_procTable);
             _procTotals = new Label {
-                Location = new Point(14, 262), Size = new Size(W - 30, 18),
+                Location = new Point(14, 262), Size = new Size(W - 30, 18), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             pc.Controls.Add(_procTotals);
             _root.Controls.Add(pc);
@@ -444,7 +484,7 @@ namespace PowerDial
                 AutoSize = true, Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel });
             _offTable = new ProcessTable {
                 Location = new Point(14, 34), Size = new Size(W - 30, ProcessTable.RowH * 7 + 22),
-                SortByCpu = true, CpuHeader = "cpu minutes", CpuSuffix = " min", CpuFormat = "0.0",
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, SortByCpu = true, CpuHeader = "cpu minutes", CpuSuffix = " min", CpuFormat = "0.0",
                 MemHeader = "peak memory", Empty = "nothing recorded yet" };
             oc.Controls.Add(_offTable);
             _root.Controls.Add(oc);
@@ -454,7 +494,7 @@ namespace PowerDial
                 Text = "Where your watts go", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _barWatts = new StackBar {
-                Location = new Point(14, 36), Size = new Size(W - 30, 44),
+                Location = new Point(14, 36), Size = new Size(W - 30, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Empty = "waiting for a reading on battery" };
             wc2.Controls.Add(_barWatts);
             _root.Controls.Add(wc2);
@@ -464,11 +504,11 @@ namespace PowerDial
                 Text = "Battery health", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _barHealth = new StackBar {
-                Location = new Point(14, 34), Size = new Size(W - 30, 44), Unit = "Wh",
+                Location = new Point(14, 34), Size = new Size(W - 30, 44), Unit = "Wh", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Empty = "capacity not readable" };
             hc.Controls.Add(_barHealth);
             _healthNote = new Label {
-                Location = new Point(14, 80), Size = new Size(W - 30, 18),
+                Location = new Point(14, 80), Size = new Size(W - 30, 18), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             hc.Controls.Add(_healthNote);
             _root.Controls.Add(hc);
@@ -493,17 +533,17 @@ namespace PowerDial
 
             _watchSummary = new Label {
                 Location = new Point(14, 12), Size = new Size(W - 30, 22),
-                Font = Theme.Title, ForeColor = Theme.Save, BackColor = Theme.Panel
+                Font = Theme.Title, ForeColor = Theme.Save, BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _watchCard.Controls.Add(_watchSummary);
 
             _watchList = new Panel {
-                Location = new Point(14, 40), Size = new Size(W - 30, 180), BackColor = Theme.Panel
+                Location = new Point(14, 40), Size = new Size(W - 30, 180), BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _watchCard.Controls.Add(_watchList);
 
             _watchButtons = new Panel {
-                Location = new Point(14, 228), Size = new Size(W - 30, 38), BackColor = Theme.Panel
+                Location = new Point(14, 228), Size = new Size(W - 30, 38), BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(0, 3), Size = new Size(126, 32) };
             recheck.Click += (s, e) => { RefreshWatch(); Log("Re-checked what could be waking the GPU."); };
@@ -541,6 +581,141 @@ namespace PowerDial
             _root.Controls.Add(new Panel {
                 Width = W, Height = 30, BackColor = Theme.Ink, Margin = new Padding(0)
             });
+
+            // built last: every section has to exist before the bar can point at them
+            BuildNav();
+            _root.Scroll += (s, e) => MarkNav();
+        }
+
+        /// <summary>
+        /// The bar under the header: one button per section, which scrolls the column to
+        /// it. The whole app is one list about three screens long, so finding the charts
+        /// or the GPU watch used to mean scrolling past everything else to get there.
+        /// Nothing is hidden - this only moves you, so every section stays on one page.
+        /// </summary>
+        void BuildNav()
+        {
+            _navBar = new Panel {
+                Location = new Point(Chrome, _readout.Bottom + 8), Width = W, Height = 30,
+                BackColor = Theme.Ink,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            string[] names = {
+                "Make it last longer", "Profiles", "Screen brightness", "What changes your watts",
+                "Analytics", "GPU watch", "Activity"
+            };
+            string[] labels = { "Fixes", "Profiles", "Brightness", "Settings", "Analytics", "GPU", "Activity" };
+
+            int x = 0;
+            for (int i = 0; i < names.Length; i++)
+            {
+                Control target;
+                if (!_sections.TryGetValue(names[i], out target)) continue;
+
+                Control local = target;
+                PillButton b = new PillButton {
+                    Text = labels[i], Location = new Point(x, 0),
+                    Size = new Size(ButtonWidth(labels[i]) - 34, 28), BackColor = Theme.Ink
+                };
+                b.Click += (s, e) => JumpTo(local);
+                _navBar.Controls.Add(b);
+                _navBtns.Add(b);
+                _navTargets.Add(local);
+                x += b.Width + 6;
+            }
+
+            _chrome.Controls.Add(_navBar);
+            _chrome.Height = _navBar.Bottom + 8;
+        }
+
+        /// <summary>Scroll the column so a section sits just under the pinned header.</summary>
+        void JumpTo(Control target)
+        {
+            if (target == null || _root == null) return;
+            // Top is in scrolled coordinates; AutoScrollPosition.Y is zero or negative,
+            // so subtracting it recovers where the control sits in the content itself.
+            int y = target.Top - _root.AutoScrollPosition.Y - 8;
+            if (y < 0) y = 0;
+            _root.AutoScrollPosition = new Point(0, y);
+            MarkNav();
+        }
+
+        /// <summary>Light the button for whichever section the column is showing.</summary>
+        void MarkNav()
+        {
+            if (_root == null || _navBtns.Count == 0) return;
+            int view = -_root.AutoScrollPosition.Y;
+            int best = 0;
+            for (int i = 0; i < _navTargets.Count; i++)
+            {
+                int top = _navTargets[i].Top - _root.AutoScrollPosition.Y;
+                if (top <= view + 24) best = i;
+            }
+            for (int i = 0; i < _navBtns.Count; i++)
+            {
+                bool on = i == best;
+                if (_navBtns[i].Selected != on) { _navBtns[i].Selected = on; _navBtns[i].Invalidate(); }
+            }
+        }
+
+        /// <summary>
+        /// Stretch what was built at the design width out to the window. Cards get set
+        /// explicitly because a FlowLayoutPanel ignores Anchor on its own children; the
+        /// controls inside each card are anchored and follow on their own.
+        /// </summary>
+        void Relayout()
+        {
+            if (_root == null) return;
+
+            int avail = ClientSize.Width - Chrome - 6 - SystemInformation.VerticalScrollBarWidth;
+            int w = Math.Max(W, Math.Min(WMax, avail));
+
+            _chrome.Width = ClientSize.Width;
+            _root.Location = new Point(0, _chrome.Height);
+            _root.Size = new Size(ClientSize.Width, Math.Max(80, ClientSize.Height - _chrome.Height));
+
+            // centre the column when the window is wider than the column is allowed to be
+            int extra = Math.Max(0, avail - w);
+            _root.Padding = new Padding(Chrome + extra / 2, 12, 6, 20);
+            _readout.Width = w;
+            _navBar.Width = w;
+            _readout.Left = Chrome + extra / 2;
+            _navBar.Left = _readout.Left;
+
+            foreach (Control c in _root.Controls)
+            {
+                if (c == null) continue;
+                // a button keeps the width its label needs - stretching Run as admin
+                // across the whole column made it look like the primary action
+                if (c is PillButton) continue;
+                // the AutoSize basic-settings box sizes itself from its rows
+                if (c == _basicBox) { foreach (Control k in c.Controls) k.Width = w; continue; }
+                c.Width = w;
+            }
+
+            // the three profile buttons share the row, so they have to be re-spaced
+            // rather than anchored - anchoring all three would overlap them
+            if (_presetBtns.Count > 0)
+            {
+                int bw = (w - (_presetBtns.Count - 1) * 8) / _presetBtns.Count;
+                int px = 0;
+                foreach (PillButton b in _presetBtns)
+                {
+                    b.Location = new Point(px, 0);
+                    b.Width = bw;
+                    px += bw + 8;
+                }
+            }
+
+            if (_fixList != null)
+                foreach (Control card in _fixList.Controls) card.Width = _fixList.Width;
+
+            if (_watchList != null)
+                foreach (Control line in _watchList.Controls) line.Width = _watchList.Width;
+
+            _root.PerformLayout();
+            MarkNav();
         }
 
         /// <summary>Section heading, with an info icon explaining the section itself.</summary>
@@ -549,6 +724,7 @@ namespace PowerDial
             Panel host = new Panel {
                 Width = W, Height = 30, BackColor = Theme.Ink, Margin = new Padding(2, 6, 0, 2)
             };
+            _sections[text] = host;
 
             float tw;
             using (Graphics g = CreateGraphics()) tw = Theme.TextW(g, text, Theme.Section);
@@ -586,12 +762,15 @@ namespace PowerDial
             Panel host = new Panel {
                 Width = W, Height = t.Height, BackColor = Theme.Ink, Margin = t.Margin
             };
+            _sections[heading] = host;
             t.Location = new Point(0, 0);
             t.Width = W - 28;
+            t.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             host.Controls.Add(t);
             InfoDot d = new InfoDot {
                 Location = new Point(W - 24, (t.Height - 18) / 2),
-                Heading = heading, Body = info, BackColor = Theme.Ink
+                Heading = heading, Body = info, BackColor = Theme.Ink,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             host.Controls.Add(d);
             d.BringToFront();
@@ -605,7 +784,8 @@ namespace PowerDial
 
             Label title = new Label {
                 Text = k.Label, Location = new Point(14, 11), Size = new Size(W - 200, 20),
-                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel, AutoEllipsis = true
+                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel,
+                AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(title);
 
@@ -613,17 +793,20 @@ namespace PowerDial
             {
                 Label badge = new Label {
                     Text = "hidden by Windows", AutoSize = true, Font = Theme.Small, ForeColor = Theme.Dim,
-                    BackColor = Theme.Panel, Location = new Point(W - 176, 13)
+                    BackColor = Theme.Panel, Location = new Point(W - 176, 13), Anchor = AnchorStyles.Top | AnchorStyles.Right
                 };
                 c.Controls.Add(badge);
             }
 
-            InfoDot dot = new InfoDot { Location = new Point(W - 34, 12), Heading = k.Label, Body = k.Info };
+            InfoDot dot = new InfoDot {
+                Location = new Point(W - 34, 12), Heading = k.Label, Body = k.Info, Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
             c.Controls.Add(dot);
 
             Label note = new Label {
                 Text = k.Note, Location = new Point(14, 31), Size = new Size(W - 40, 18),
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel, AutoEllipsis = true
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel,
+                AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(note);
 
@@ -651,7 +834,7 @@ namespace PowerDial
                 Slider sl = new Slider {
                     Location = new Point(14, 54), Size = new Size(W - 250, 28),
                     Minimum = k.Min, Maximum = k.Max, Step = (k.Unit == "s" ? 60 : 1),
-                    Accent = Theme.Save
+                    Accent = Theme.Save, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
                 };
                 sl.ValueChanged += (s, e) => {
                     if (row.Value != null) row.Value.Text = PowerCfg.Describe(k, sl.Value);
@@ -665,7 +848,7 @@ namespace PowerDial
                 row.Value = new Label {
                     Text = "--", Location = new Point(W - 226, 55), Size = new Size(70, 24),
                     Font = Theme.Value, ForeColor = Theme.Text, BackColor = Theme.Panel,
-                    TextAlign = ContentAlignment.MiddleRight
+                    TextAlign = ContentAlignment.MiddleRight, Anchor = AnchorStyles.Top | AnchorStyles.Right
                 };
                 c.Controls.Add(row.Value);
             }
@@ -673,7 +856,7 @@ namespace PowerDial
             row.Status = new Label {
                 Text = "", Location = new Point(W - 236, 58), Size = new Size(222, 20),
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel,
-                TextAlign = ContentAlignment.MiddleRight
+                TextAlign = ContentAlignment.MiddleRight, Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             c.Controls.Add(row.Status);
 
@@ -802,17 +985,41 @@ namespace PowerDial
                 _chartWatts.Seed(w);
             }
 
+            // the average runtime in the header comes from these same recorded points, so
+            // it is recomputed here rather than anywhere it could drift out of step
+            _avg = RuntimeAverage.From(pts);
+            PushAverage();
+
             History.Stats st = History.Summarise(pts);
             string line = st.Points + " minutes recorded";
             if (st.BatteryPoints > 0)
                 line += "   ·   " + FmtHours(st.BatteryMinutes / 60.0) + " of it on battery, averaging " +
                         st.AvgWatts.ToString("0.00") + " W (" + st.MinWatts.ToString("0.00") + " to " +
                         st.MaxWatts.ToString("0.00") + ")";
+            double? full = _avg.FromFull(_bat.FullChargeMwh);
+            if (full.HasValue)
+                line += "   ·   " + FmtHours(full.Value) + " from a full charge at that average";
             long bytes = History.DiskBytes();
             line += "   ·   " + (bytes / 1024.0).ToString("0") + " KB on disk";
             _histLabel.Text = line;
 
             RefreshOffenders();
+        }
+
+        /// <summary>
+        /// Turn the measured average draw into the figures the header shows. Kept apart
+        /// from RefreshHistory because the capacity it divides into comes from the battery
+        /// poll, which runs four times a minute against history's once.
+        /// </summary>
+        void PushAverage()
+        {
+            if (_readout == null) return;
+            _readout.Avg = _avg;
+            _readout.AvgFromFull = _avg.FromFull(_bat.FullChargeMwh);
+            _readout.AvgLeft = _avg.Left(_bat.RemainingMwh);
+            _readout.AvgBest = _avg.Best(_bat.FullChargeMwh);
+            _readout.AvgWorst = _avg.Worst(_bat.FullChargeMwh);
+            _readout.Invalidate();
         }
 
         /// <summary>Write one history point a minute. Anything faster is noise and disk churn.</summary>
@@ -915,6 +1122,7 @@ namespace PowerDial
             _readout.Health = _bat.HealthPercent;
             _readout.Mwh = _bat.RemainingMwh;
             _readout.FullMwh = _bat.FullChargeMwh;
+            PushAverage();
             _readout.Invalidate();
             RefreshAnalytics();
 
@@ -934,7 +1142,8 @@ namespace PowerDial
             {
                 Finding local = item;
                 Panel line = new Panel {
-                    Location = new Point(0, y), Size = new Size(_watchList.Width, 22), BackColor = Theme.Panel
+                    Location = new Point(0, y), Size = new Size(_watchList.Width, 22),
+                    BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
                 };
                 line.Paint += (s, e) => {
                     Graphics g = e.Graphics;
@@ -1042,18 +1251,20 @@ namespace PowerDial
 
             Label title = new Label {
                 Text = s.Title, Location = new Point(12, 9), Size = new Size(w - 190, 20),
-                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Inset, AutoEllipsis = true
+                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Inset,
+                AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(title);
 
             InfoDot dot = new InfoDot {
-                Location = new Point(w - 28, 10), Heading = s.Title, Body = s.Info, BackColor = Theme.Inset
+                Location = new Point(w - 28, 10), Heading = s.Title, Body = s.Info,
+                BackColor = Theme.Inset, Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             c.Controls.Add(dot);
 
             Label detail = new Label {
                 Text = s.Detail, Location = new Point(12, 30), Size = new Size(w - 34, 32),
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Inset
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Inset, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(detail);
 
@@ -1070,10 +1281,10 @@ namespace PowerDial
                 Graphics g = e.Graphics;
                 Theme.Quality(g);
                 if (local.Gain.HasValue && local.Gain.Value > 0.05)
-                    Theme.StrRight(g, "~" + local.Gain.Value.ToString("0.0") + " W", Theme.Value, Theme.Save, w - 34, 6);
+                    Theme.StrRight(g, "~" + local.Gain.Value.ToString("0.0") + " W", Theme.Value, Theme.Save, c.Width - 34, 6);
                 string change = local.Change;
                 if (change.Length > 0)
-                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, w - 14, 70);
+                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, c.Width - 14, 70);
             };
 
             return c;
@@ -1287,6 +1498,14 @@ namespace PowerDial
         public int? Mwh, FullMwh;
         public int WindowSeconds = 60;
 
+        /// <summary>The measured average, and what it implies. Null figures print as
+        /// "not measured yet" - never as a borrowed number.</summary>
+        public RuntimeAverage Avg = new RuntimeAverage();
+        public double? AvgFromFull, AvgLeft, AvgBest, AvgWorst;
+
+        /// <summary>Y of the hairline under the live row - the sparkline sits above it.</summary>
+        public const int AvgBandTop = 106;
+
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -1334,6 +1553,56 @@ namespace PowerDial
             string state = OnAc ? (Charging ? "on AC, charging" : "on AC") : "on battery";
             if (Mwh.HasValue && FullMwh.HasValue) state += "   ·   " + Mwh.Value.ToString("N0") + " of " + FullMwh.Value.ToString("N0") + " mWh";
             Theme.StrRight(g, state, Theme.Small, Theme.Dim, Width - 16, 56);
+
+            PaintAverage(g);
+        }
+
+        /// <summary>
+        /// The band under the trace: how long the battery lasts on the draw this PC has
+        /// actually recorded, rather than on whatever this one minute happens to be doing.
+        /// The live figure above swings by several watts as the CPU breathes; this is the
+        /// one that answers "how long does it last".
+        /// </summary>
+        void PaintAverage(Graphics g)
+        {
+            int top = AvgBandTop;
+            using (Pen p = new Pen(Theme.Edge, 1f))
+                g.DrawLine(p, 14, top, Width - 14, top);
+
+            Theme.Str(g, "TYPICAL, MEASURED HERE", Theme.Small, Theme.Dim, 14, top + 7);
+
+            if (!Avg.Known)
+            {
+                Theme.Str(g, "not measured yet", Theme.Value, Theme.Dim, 14, top + 26);
+                Theme.StrRight(g,
+                    "time on battery is recorded a minute at a time - this fills in as you use it",
+                    Theme.Small, Theme.Dim, Width - 14, top + 31);
+                return;
+            }
+
+            // three figures, all of them measured arithmetic: mean draw, and what that
+            // draw does to a full pack and to what is left in it right now
+            float x = 14;
+            x += Band(g, x, top, Avg.Watts.ToString("0.00") + " W", "average draw",
+                      Avg.Watts > 12 ? Theme.Spend : Theme.Save);
+            x += Band(g, x, top, HM(AvgFromFull), "from a full charge", Theme.Text);
+            x += Band(g, x, top, HM(AvgLeft), "left at that rate", Theme.Text);
+
+            string prov = "over " + HM(Avg.Minutes / 60.0) + " on battery";
+            if (Avg.High > Avg.Low + 0.05)
+                prov += "  ·  " + Avg.Low.ToString("0.0") + " to " + Avg.High.ToString("0.0") + " W";
+            if (AvgBest.HasValue && AvgWorst.HasValue)
+                prov += "  ·  " + HM(AvgWorst) + " to " + HM(AvgBest) + " from full";
+            Theme.StrRight(g, prov, Theme.Small, Theme.Dim, Width - 14, top + 47);
+        }
+
+        /// <summary>One figure in the average band. Returns how far to step right.</summary>
+        float Band(Graphics g, float x, int top, string v, string label, Color c)
+        {
+            Theme.Str(g, v, Theme.Stat, c, x, top + 22);
+            Theme.Str(g, label, Theme.Small, Theme.Dim, x + 2, top + 47);
+            float w = Math.Max(Theme.TextW(g, v, Theme.Stat), Theme.TextW(g, label, Theme.Small));
+            return w + 28;
         }
 
         void Stat(Graphics g, float x, string v, string label, Color c)
@@ -1347,6 +1616,14 @@ namespace PowerDial
             if (h < 0 || h > 99) return "--";
             int t = (int)Math.Round(h * 60);
             return (t / 60) + ":" + (t % 60).ToString("00");
+        }
+
+        /// <summary>"4h 55m" - the form people read a runtime in.</summary>
+        static string HM(double? h)
+        {
+            if (!h.HasValue || h.Value < 0 || h.Value > 99) return "--";
+            int t = (int)Math.Round(h.Value * 60);
+            return (t / 60) + "h " + (t % 60).ToString("00") + "m";
         }
     }
 }

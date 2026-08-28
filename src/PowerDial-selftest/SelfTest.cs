@@ -44,11 +44,68 @@ class SelfTest
               readable + " of " + PowerCfg.Knobs.Count);
         Console.WriteLine();
 
-        Console.WriteLine("--- spot-check against values verified by hand this session ---");
-        CheckKnob("epp", 80, "EPP on battery should be 80");
-        CheckKnob("lid", 1, "lid close should be Sleep");
-        CheckKnob("switchable", 0, "switchable graphics should be Force power-saving");
-        CheckKnob("cpumin", 5, "min processor state should be 5");
+        // These used to be four values verified by hand in one session and then frozen
+        // into the test. They failed every time a profile was applied - which is the app's
+        // main feature - so they measured how recently someone had edited the test rather
+        // than whether the machine was sane. What follows asserts things that stay true.
+        Console.WriteLine("--- every value is one the setting actually allows ---");
+        int outOfRange = 0, unreadable = 0;
+        foreach (Knob k in PowerCfg.Knobs)
+        {
+            if (!PowerCfg.Exists(k)) continue;
+            int? v = PowerCfg.Read(k, true);
+            if (!v.HasValue) { unreadable++; continue; }
+            bool okRange = k.Choices != null
+                ? k.Choices.ContainsKey(v.Value)
+                : v.Value >= k.Min && v.Value <= k.Max;
+            if (!okRange)
+            {
+                outOfRange++;
+                Console.WriteLine("    " + k.Label.PadRight(34) + PowerCfg.Describe(k, v) +
+                                  "   outside " + (k.Choices != null ? "the known choices"
+                                                 : k.Min + "-" + k.Max));
+            }
+        }
+        Check("every battery value is in range", outOfRange == 0, outOfRange + " outside");
+        Check("every defined setting reads back", unreadable == 0, unreadable + " unreadable");
+        Console.WriteLine();
+
+        // Two real failure modes, worth defending regardless of which profile is on.
+        Console.WriteLine("--- the two that bite ---");
+        Knob lid = PowerCfg.Find("lid");
+        int? lidV = lid == null ? null : PowerCfg.Read(lid, true);
+        Check("closing the lid on battery does something",
+              lidV.HasValue && lidV.Value != 0,
+              lid == null ? "no lid setting here" : PowerCfg.Describe(lid, lidV) +
+              " - Do nothing is how a laptop flattens itself in a bag");
+
+        Knob sleep = PowerCfg.Find("sleepidle");
+        int? sleepV = sleep == null ? null : PowerCfg.Read(sleep, true);
+        Check("it sleeps on battery eventually",
+              sleepV.HasValue && sleepV.Value > 0,
+              sleep == null ? "no sleep setting here" : PowerCfg.Describe(sleep, sleepV));
+        Console.WriteLine();
+
+        // Which profile the machine currently matches, if any. Reported, never asserted -
+        // a custom set of values is a legitimate state, not a failure.
+        Console.WriteLine("--- current state against the profiles ---");
+        string matched = null;
+        foreach (Preset p in Presets.All)
+        {
+            bool all = true;
+            foreach (KeyValuePair<string, int> kv in p.Values)
+            {
+                Knob k = PowerCfg.Find(kv.Key);
+                if (k == null || !PowerCfg.Exists(k)) continue;
+                int? v = PowerCfg.Read(k, true);
+                if (!v.HasValue || v.Value != kv.Value) { all = false; break; }
+            }
+            if (all) { matched = p.Name; break; }
+        }
+        Console.WriteLine("  " + (matched != null
+            ? "matches the " + matched + " profile exactly"
+            : "a custom mix, matching no profile exactly - perfectly normal"));
+        Check("profile comparison ran", true, matched ?? "custom");
         Console.WriteLine();
 
         Console.WriteLine("--- brightness ---");

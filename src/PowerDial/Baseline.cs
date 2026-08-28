@@ -38,6 +38,10 @@ namespace PowerDial
         /// can actually see was the one Restore could not undo.
         /// </summary>
         public int? Brightness { get; set; }
+
+        /// <summary>When the plugged-in side was added, if it was filled in after the
+        /// original capture rather than taken with it. Null means it was there all along.</summary>
+        public string AcCapturedUtc { get; set; }
     }
 
     /// <summary>
@@ -103,6 +107,51 @@ namespace PowerDial
             catch (Exception ex)
             {
                 return "Could not save a restore point: " + ex.Message;
+            }
+        }
+
+        /// <summary>
+        /// Fill in the plugged-in side on a snapshot taken before it was recorded.
+        ///
+        /// Safe precisely because nothing wrote AC until the Plugged in switch existed: on
+        /// a snapshot without it, the live AC values are still the pre-app ones. It runs at
+        /// most once, before the user can reach that switch, so it can never capture a
+        /// value the app itself put there.
+        ///
+        /// Brightness is deliberately NOT backfilled the same way. The profiles set it, so
+        /// the current level is very likely something this app chose, and recording that as
+        /// the original would be a lie.
+        /// </summary>
+        public static string BackfillAcIfMissing()
+        {
+            try
+            {
+                if (!Exists) return null;
+                BaselineFile bf = Load();
+                if (bf.Entries == null || bf.Entries.Count == 0) return null;
+
+                foreach (BaselineEntry e in bf.Entries)
+                    if (e.AcValue.HasValue) return null;      // already has it, leave alone
+
+                int added = 0;
+                foreach (BaselineEntry e in bf.Entries)
+                {
+                    Knob k = PowerCfg.Find(e.Key);
+                    if (k == null) continue;
+                    e.AcValue = PowerCfg.Read(k, false);
+                    e.AcWasExplicit = PowerCfg.IsExplicit(k, false);
+                    if (e.AcValue.HasValue) added++;
+                }
+                if (added == 0) return null;
+
+                bf.AcCapturedUtc = DateTime.UtcNow.ToString("u");
+                Save(bf);
+                return "Added the plugged-in side to the restore point (" + added + " values). " +
+                       "Safe to take now: nothing had written that side yet.";
+            }
+            catch (Exception ex)
+            {
+                return "Could not add the plugged-in side to the restore point: " + ex.Message;
             }
         }
 

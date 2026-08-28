@@ -30,6 +30,12 @@ are missing from those images — that is the capture, not the app.
 
 **Run both suites after any change.** They are read-only and take about a minute.
 
+**Quit the running copy first.** The tray app and the UI test both append to
+`offenders.json`, each from its own in-memory tally, so whichever saves last wins and the
+file can come out smaller than it went in. That trips the *history file grew* check at
+random. It is a race between two processes, not a regression — if that check is the only
+failure, close PowerDial and run it again.
+
 ## Hard invariants — do not break these
 
 1. **The DC (on-battery) side is the default, and the only side anything writes by

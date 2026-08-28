@@ -131,7 +131,7 @@ class UiTest
         foreach (Control c in all) { PillButton pb = c as PillButton;
             if (pb != null && pb.Text == "Restore original settings") renamed = true; }
         Check("restore button reads Restore original settings", renamed);
-        Check("two collapsible sections", toggles == 2, toggles + " found");
+        Check("three collapsible sections", toggles == 3, toggles + " found");
         Check("Basic settings section exists", basicToggle != null);
 
         // no stock Win32 TrackBar or ComboBox should survive the redesign
@@ -167,6 +167,15 @@ class UiTest
 
         ScrollTo(column, 0);
         Check("and shifts back on the way up", SelectedTab(tabs) == atTop);
+
+        // The last section sits a few dozen pixels from the end, so "its top has passed the
+        // viewport top" can never be true for it on a normal-sized window. Scrolled to the
+        // bottom, the last tab has to be the current one or it is unreachable.
+        ScrollTo(column, 999999);
+        int atEnd = SelectedTab(tabs);
+        Check("the last tab is current at the bottom", atEnd == tabs.Count - 1,
+              atEnd < 0 ? "none current" : tabs[atEnd].Text + " (expected " + tabs[tabs.Count - 1].Text + ")");
+        ScrollTo(column, 0);
 
         // clicking a tab has to move the column, not merely light the tab
         int wasAt = -column.AutoScrollPosition.Y;

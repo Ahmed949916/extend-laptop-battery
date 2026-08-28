@@ -18,11 +18,37 @@ namespace PowerDial
     /// responsiveness for the last watt or so; Full speed gives the CPU its head while
     /// still on battery. Apply one, then watch the power draw chart to see what it did
     /// here - the numbers differ by hardware.
+    ///
+    /// Longest goes further than Endurance and is the only one that turns turbo off
+    /// outright. Worth knowing why that is not obviously the winner: boost finishing a
+    /// burst quickly lets the CPU return to idle sooner, and idle is where the savings
+    /// really are, so disabling it can cost as much as it saves on some machines. It is
+    /// offered because on others it plainly helps - which is exactly why the app tells you
+    /// to A/B the draw rather than trusting the label. For the same reason cpumax stays at
+    /// 99 (boost off) rather than throttling to a fraction of base clock, which reliably
+    /// makes everything slower without reliably drawing less over the whole task.
     /// </summary>
     public static class Presets
     {
         public static readonly List<Preset> All = new List<Preset>
         {
+            new Preset {
+                Name = "Longest",
+                Blurb = "Everything traded for runtime. Boost off, dimmest screen, sleeps quickly.",
+                Brightness = 20,
+                Values = new Dictionary<string, int> {
+                    { "epp", 100 },        // all efficiency, no chasing clocks at all
+                    { "cpumax", 99 },      // 99 rather than lower: see the note below
+                    { "boost", 0 },        // Off - the only preset that disables turbo outright
+                    { "cpumin", 5 },
+                    { "videoidle", 60 },
+                    { "sleepidle", 180 },
+                    { "hibernateidle", 1800 },
+                    { "lid", 1 },          // Sleep
+                    { "switchable", 0 },   // always the efficient GPU
+                    { "pcie", 2 },         // maximum link power saving
+                }
+            },
             new Preset {
                 Name = "Endurance",
                 Blurb = "Every last minute. Boost locked out, dim screen, quick sleep.",

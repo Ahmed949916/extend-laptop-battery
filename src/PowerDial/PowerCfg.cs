@@ -281,8 +281,25 @@ namespace PowerDial
         /// <summary>Writes the battery-side value. Returns null on success, else the error text.</summary>
         public static string WriteDc(Knob knob, int value)
         {
+            return Write(knob, value, true);
+        }
+
+        /// <summary>
+        /// Write the plugged-in side. Separate from WriteDc and never called by the
+        /// advisor, the profiles or the restore point - those are all about battery life
+        /// and have no business touching AC. Only the explicit Plugged in switch in the
+        /// settings section reaches this, so a stray write cannot happen by accident.
+        /// </summary>
+        public static string WriteAc(Knob knob, int value)
+        {
+            return Write(knob, value, false);
+        }
+
+        public static string Write(Knob knob, int value, bool onBattery)
+        {
             string err = RunChecked("powercfg",
-                "/setdcvalueindex SCHEME_CURRENT " + knob.SubGroup + " " + knob.Guid + " " + value);
+                (onBattery ? "/setdcvalueindex " : "/setacvalueindex ") +
+                "SCHEME_CURRENT " + knob.SubGroup + " " + knob.Guid + " " + value);
             if (err != null) return err;
             // powercfg only commits a change when the scheme is re-activated
             return RunChecked("powercfg", "/setactive SCHEME_CURRENT");

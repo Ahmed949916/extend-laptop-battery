@@ -148,9 +148,12 @@ class UiTest
         // section pass or fail on timing. Let it land before scrolling anywhere.
         for (int i = 0; i < 20; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
 
-        List<PillButton> tabs = new List<PillButton>();
-        foreach (Control c in all) { PillButton pb = c as PillButton; if (pb != null && pb.Tab) tabs.Add(pb); }
-        Check("a section bar was built", tabs.Count >= 5, tabs.Count + " tabs");
+        // the section bar itself, not every control that renders in the tab style - the
+        // battery / plugged-in switch uses the same look and is not a nav tab
+        List<PillButton> tabs = Field(f, "_navBtns") as List<PillButton>;
+        Check("a section bar was built", tabs != null && tabs.Count >= 5,
+              (tabs == null ? "no _navBtns" : tabs.Count + " tabs"));
+        if (tabs == null) tabs = new List<PillButton>();
 
         ScrollableControl column = f.Controls[0] as ScrollableControl;
         ScrollTo(column, 0);

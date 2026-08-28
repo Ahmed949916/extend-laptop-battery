@@ -32,7 +32,16 @@ are missing from those images — that is the capture, not the app.
 
 ## Hard invariants — do not break these
 
-1. **Only the DC (on-battery) side is ever written.** No code path may touch AC values.
+1. **The DC (on-battery) side is the default, and the only side anything writes by
+   itself.** The advisor, the three profiles and the restore point are all about battery
+   life and call `PowerCfg.WriteDc` exclusively — none of them may ever touch AC. The one
+   exception is deliberate and user-driven: the *Plugged in* switch in the settings
+   section, which routes that section's edits through `PowerCfg.WriteAc`. It is opt-in,
+   resets to battery on every launch, and says on screen which side it is writing.
+   Because the app can now change AC, **the restore point captures both sides** — a
+   snapshot covering only battery would silently fail to undo half of what the app can do.
+   Snapshots taken before that existed have `AcValue = null` and restore battery only,
+   saying so rather than guessing.
 2. **Read from the registry, write with `powercfg`.** `powercfg /q` refuses to display
    hidden settings — it returns just a scheme header for the lid action — so reads go to
    `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<scheme>\<sub>\<setting>`,

@@ -10,6 +10,15 @@ namespace PowerDial
         public string Key { get; set; }
         public int? Value { get; set; }
         public bool WasExplicit { get; set; }   // stored in the scheme vs inherited from a default
+
+        /// <summary>
+        /// The plugged-in value as it stood on first run. Recorded because the settings
+        /// section can now write that side too, and a restore point that only covers
+        /// battery would quietly fail to undo half of what the app can do. Null on
+        /// snapshots taken before this existed - those restore battery only, and say so.
+        /// </summary>
+        public int? AcValue { get; set; }
+        public bool AcWasExplicit { get; set; }
     }
 
     public class BaselineFile
@@ -82,7 +91,9 @@ namespace PowerDial
                     {
                         Key = k.Key,
                         Value = PowerCfg.Read(k, true),
-                        WasExplicit = PowerCfg.IsExplicit(k, true)
+                        WasExplicit = PowerCfg.IsExplicit(k, true),
+                        AcValue = PowerCfg.Read(k, false),
+                        AcWasExplicit = PowerCfg.IsExplicit(k, false)
                     });
                 }
                 Save(bf);
@@ -131,12 +142,23 @@ namespace PowerDial
             log.Add("Restore point: " + bf.Source);
             if (bf.CapturedUtc != "(none)") log.Add("Captured " + bf.CapturedUtc + " UTC");
 
-            int ok = 0, failed = 0, inherited = 0;
+            int ok = 0, failed = 0, inherited = 0, acOk = 0, acSkipped = 0;
             foreach (BaselineEntry e in bf.Entries)
             {
                 Knob k = PowerCfg.Find(e.Key);
                 if (k == null) { log.Add("  skipped " + e.Key + " - no longer a setting"); continue; }
                 if (!e.Value.HasValue) { log.Add("  skipped " + k.Label + " - nothing was recorded"); continue; }
+
+                // the plugged-in side first, and only when this snapshot actually recorded it
+                if (e.AcValue.HasValue)
+                {
+                    string acErr = PowerCfg.Write(k, e.AcValue.Value, false);
+                    int? acBack = acErr == null ? PowerCfg.Read(k, false) : null;
+                    if (acErr == null && acBack.HasValue && acBack.Value == e.AcValue.Value) acOk++;
+                    else log.Add("  unverified " + k.Label + " plugged in - " +
+                                 (acErr != null ? acErr : "reads back as " + PowerCfg.Describe(k, acBack)));
+                }
+                else acSkipped++;
 
                 string err = PowerCfg.WriteDc(k, e.Value.Value);
                 if (err != null) { log.Add("  failed  " + k.Label + " - " + err); failed++; continue; }
@@ -176,7 +198,10 @@ namespace PowerDial
             }
             else log.Add("  skipped screen brightness - none was recorded on this PC");
 
-            log.Add(ok + " restored, " + failed + " failed.");
+            log.Add(ok + " restored on battery, " + acOk + " plugged in, " + failed + " failed.");
+            if (acSkipped > 0)
+                log.Add(acSkipped + " setting(s) had no plugged-in value recorded - this restore point " +
+                        "predates the app being able to write that side, so it was left alone.");
             if (inherited > 0)
                 log.Add(inherited + " of them had no stored value before and now do. The behaviour is " +
                         "identical; only the bookkeeping differs.");

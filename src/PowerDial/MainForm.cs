@@ -67,6 +67,11 @@ namespace PowerDial
         Panel _contribList;
         PillButton _fixRecheck;
 
+        // which side the settings section writes. Battery unless explicitly switched.
+        bool _acMode;
+        PillButton _sideDc, _sideAc;
+        Label _sideNote;
+
         readonly ProcessWatch _procWatch = new ProcessWatch();
         List<ProcInfo> _procs = new List<ProcInfo>();
         RuntimeAverage _avg = new RuntimeAverage();
@@ -410,7 +415,12 @@ namespace PowerDial
                 "back from the registry to confirm they stuck. The Activity section shows what " +
                 "actually happened.\n\n" +
                 "Timeouts and lid behaviour live under Basic settings instead, because they change " +
-                "nothing while you are actually at the keyboard."));
+                "nothing while you are actually at the keyboard.\n\n" +
+                "The switch chooses which side you are editing. Battery is the default and the only " +
+                "side the profiles, the suggestions and the restore point ever write."));
+
+            _root.Controls.Add(BuildSideSwitch());
+
             foreach (Knob k in PowerCfg.Knobs)
                 if (!k.Basic && PowerCfg.Exists(k)) _root.Controls.Add(BuildRow(k));
 
@@ -887,6 +897,57 @@ namespace PowerDial
             return host;
         }
 
+        /// <summary>
+        /// Which side the settings below write to. Battery is the default; plugged in is
+        /// opt-in and says so plainly while it is on, because on that side a change costs
+        /// you nothing in runtime and there is no measurement to check it against.
+        /// </summary>
+        Panel BuildSideSwitch()
+        {
+            Panel host = new Panel {
+                Width = W, Height = 62, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 10)
+            };
+
+            _sideDc = new PillButton {
+                Text = "On battery", Tab = true, Location = new Point(0, 0),
+                Size = new Size(128, 30), Selected = true, BackColor = Theme.Ink
+            };
+            _sideAc = new PillButton {
+                Text = "Plugged in", Tab = true, Location = new Point(130, 0),
+                Size = new Size(128, 30), BackColor = Theme.Ink
+            };
+            _sideDc.Click += (s, e) => SetSide(false);
+            _sideAc.Click += (s, e) => SetSide(true);
+            host.Controls.Add(_sideDc);
+            host.Controls.Add(_sideAc);
+
+            _sideNote = new Label {
+                Location = new Point(2, 36), Size = new Size(W - 4, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Ink,
+                Text = "Editing the battery side. This is what the profiles, the suggestions and the "
+                     + "restore point write."
+            };
+            host.Controls.Add(_sideNote);
+            return host;
+        }
+
+        void SetSide(bool ac)
+        {
+            _acMode = ac;
+            _sideDc.Selected = !ac; _sideDc.Invalidate();
+            _sideAc.Selected = ac;  _sideAc.Invalidate();
+            _sideNote.Text = ac
+                ? "Editing the plugged-in side. Battery values are untouched, and nothing here changes "
+                  + "your runtime - on mains there is no drain to measure against."
+                : "Editing the battery side. This is what the profiles, the suggestions and the "
+                  + "restore point write.";
+            _sideNote.ForeColor = ac ? Theme.Spend : Theme.Dim;
+            LoadValues();
+            Log(ac ? "Switched to editing the plugged-in side."
+                   : "Switched back to editing the battery side.");
+        }
+
         Card BuildRow(Knob k)
         {
             Card c = new Card { Width = W, Height = 110, Margin = new Padding(0, 0, 0, 8) };
@@ -1085,15 +1146,18 @@ namespace PowerDial
             {
                 foreach (Row r in _rows)
                 {
-                    int? v = PowerCfg.Read(r.Knob, true);
+                    // the controls always show the side being edited; the footer shows both
+                    int? dc = PowerCfg.Read(r.Knob, true);
                     int? ac = PowerCfg.Read(r.Knob, false);
-                    bool expl = PowerCfg.IsExplicit(r.Knob, true);
+                    int? v = _acMode ? ac : dc;
+                    bool expl = PowerCfg.IsExplicit(r.Knob, !_acMode);
 
-                    // Both sides, side by side. Only the battery one is ever written - the
-                    // plugged-in figure is here to compare against, never to change.
+                    string batTail = _acMode ? "" : "  ◀ editing";
+                    string acTail = _acMode ? "  ◀ editing" : "";
                     r.Status.Text =
-                        "on battery  " + PowerCfg.Describe(r.Knob, v) + (expl ? "" : "  (inherited)") +
-                        "        plugged in  " + PowerCfg.Describe(r.Knob, ac) + "  (not touched)";
+                        "on battery  " + PowerCfg.Describe(r.Knob, dc) + batTail +
+                        "        plugged in  " + PowerCfg.Describe(r.Knob, ac) + acTail +
+                        (expl ? "" : "        (inherited)");
 
                     if (!v.HasValue) continue;
                     if (r.Combo != null)
@@ -1649,20 +1713,26 @@ namespace PowerDial
 
         void ApplyKnob(Row row, int value)
         {
-            string err = PowerCfg.WriteDc(row.Knob, value);
+            bool dc = !_acMode;
+            string side = dc ? "on battery" : "plugged in";
+            string err = PowerCfg.Write(row.Knob, value, dc);
             if (err != null)
             {
-                Log("Could not change " + row.Knob.Label + ": " + err);
+                Log("Could not change " + row.Knob.Label + " " + side + ": " + err);
                 ShowLog();
             }
             else
             {
-                int? back = PowerCfg.Read(row.Knob, true);
+                // read the same side straight back - never claim a write we have not confirmed
+                int? back = PowerCfg.Read(row.Knob, dc);
                 if (back.HasValue && back.Value == value)
-                    Log(row.Knob.Label + " set to " + PowerCfg.Describe(row.Knob, value));
+                    Log(row.Knob.Label + " " + side + " set to " + PowerCfg.Describe(row.Knob, value));
                 else
-                    Log(row.Knob.Label + " did not stick - it reads back as " + PowerCfg.Describe(row.Knob, back));
-                _bat.ResetWindow(); _spark.Clear();
+                    Log(row.Knob.Label + " " + side + " did not stick - it reads back as " +
+                        PowerCfg.Describe(row.Knob, back));
+
+                // only a battery-side change invalidates the draw measurement
+                if (dc) { _bat.ResetWindow(); _spark.Clear(); _window.Clear(); }
             }
             LoadValues();
             RefreshFixes();
@@ -1713,12 +1783,16 @@ namespace PowerDial
                 ? "Screen brightness goes back to " + bf.Brightness.Value + "%.\n"
                 : "Screen brightness is left alone - this restore point predates the app\n" +
                   "recording it, so there is no level to go back to.\n";
+            int withAc = 0;
+            foreach (BaselineEntry e in bf.Entries) if (e.AcValue.HasValue) withAc++;
+            string acLine = withAc > 0
+                ? "Both sides are restored: " + bf.Entries.Count + " on battery, " + withAc + " plugged in.\n"
+                : bf.Entries.Count + " battery settings will be rewritten. Plugged-in values are left\n" +
+                  "alone - this restore point predates the app recording them.\n";
             DialogResult r = MessageBox.Show(
-                "Put back the battery settings as they were before PowerDial?\n\n" +
+                "Put the settings back as they were before PowerDial?\n\n" +
                 "Restore point: " + when + "\n" +
-                bf.Entries.Count + " settings will be rewritten.\n" +
-                bright + "\n" +
-                "Your plugged-in settings are not touched.",
+                acLine + bright,
                 "Restore my settings", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 

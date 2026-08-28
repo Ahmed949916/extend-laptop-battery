@@ -52,7 +52,24 @@ class UiTest
         ScrollableControl sc = panel as ScrollableControl;
         if (sc == null) return;
         sc.AutoScrollPosition = new Point(0, y);
+
+        // A user scrolls with the wheel or the scrollbar, and SteadyPanel hooks both.
+        // Setting the position in code raises neither, and this form lives off-screen so it
+        // may never repaint - so call the same public check the panel calls itself, rather
+        // than depending on a WM_PAINT that may not arrive. Without this the tab assertions
+        // pass or fail on timing.
+        SteadyPanel sp = panel as SteadyPanel;
+        if (sp != null) sp.CheckMoved();
         Application.DoEvents();
+    }
+
+    /// <summary>Index of the one current tab, or -1 if it is not exactly one.</summary>
+    static int SelectedTab(List<PillButton> tabs)
+    {
+        int which = -1, count = 0;
+        for (int i = 0; i < tabs.Count; i++)
+            if (tabs[i].Selected) { which = i; count++; }
+        return count == 1 ? which : -1;
     }
 
     static int CountApplicable(List<Suggestion> l)
@@ -121,6 +138,40 @@ class UiTest
         int legacy = 0;
         foreach (Control c in all) if (c is TrackBar || c is ComboBox) legacy++;
         Check("no stock TrackBar/ComboBox left", legacy == 0, legacy + " found");
+        Console.WriteLine();
+
+        Console.WriteLine("--- section bar follows the scroll ---");
+
+        // MainForm.OnShown arms a 60 ms timer that parks the column back at the top, so the
+        // header cannot open below the fold. If it fires part-way through these assertions
+        // it scrolls the column out from under them - which is exactly what made this
+        // section pass or fail on timing. Let it land before scrolling anywhere.
+        for (int i = 0; i < 20; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+
+        List<PillButton> tabs = new List<PillButton>();
+        foreach (Control c in all) { PillButton pb = c as PillButton; if (pb != null && pb.Tab) tabs.Add(pb); }
+        Check("a section bar was built", tabs.Count >= 5, tabs.Count + " tabs");
+
+        ScrollableControl column = f.Controls[0] as ScrollableControl;
+        ScrollTo(column, 0);
+        int atTop = SelectedTab(tabs);
+        Check("exactly one tab is current at the top", atTop == 0, "tab index " + atTop);
+
+        ScrollTo(column, 2400);
+        int deep = SelectedTab(tabs);
+        Check("the current tab shifts as the column scrolls", deep > atTop,
+              (atTop < 0 ? "none" : tabs[atTop].Text) + " -> " + (deep < 0 ? "none" : tabs[deep].Text));
+
+        ScrollTo(column, 0);
+        Check("and shifts back on the way up", SelectedTab(tabs) == atTop);
+
+        // clicking a tab has to move the column, not merely light the tab
+        int wasAt = -column.AutoScrollPosition.Y;
+        tabs[tabs.Count - 1].Press();
+        Application.DoEvents();
+        Check("clicking a tab scrolls to its section", -column.AutoScrollPosition.Y > wasAt,
+              wasAt + " -> " + (-column.AutoScrollPosition.Y));
+        ScrollTo(column, 0);
         Console.WriteLine();
 
         Console.WriteLine("--- analytics: real, not modelled ---");

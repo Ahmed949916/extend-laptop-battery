@@ -16,9 +16,52 @@ namespace PowerDial
     /// </summary>
     public class SteadyPanel : FlowLayoutPanel
     {
+        /// <summary>
+        /// Raised whenever the view has actually moved, whatever moved it.
+        ///
+        /// Watching the position rather than the cause is the point. The stock Scroll event
+        /// covers the scrollbar but not the wheel, and neither fires when something sets
+        /// AutoScrollPosition in code - so a section bar wired to Scroll alone goes stale
+        /// the moment anyone spins the wheel or the app scrolls itself. Comparing the
+        /// position is free, so this can be called from anywhere cheaply.
+        /// </summary>
+        public event EventHandler Scrolled;
+
+        Point _seen = new Point(int.MinValue, int.MinValue);
+
+        /// <summary>Fire Scrolled if the view has moved since the last check.</summary>
+        public void CheckMoved()
+        {
+            Point p = AutoScrollPosition;
+            if (p == _seen) return;
+            _seen = p;
+            if (Scrolled != null) Scrolled(this, EventArgs.Empty);
+        }
+
         protected override Point ScrollToControl(Control activeControl)
         {
             return DisplayRectangle.Location;
+        }
+
+        protected override void OnScroll(ScrollEventArgs se)
+        {
+            base.OnScroll(se);
+            CheckMoved();
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            CheckMoved();
+        }
+
+        // scrolling by any route repaints the panel, which makes this the one hook that
+        // catches a programmatic move as well. Safe against re-entry: the handler only
+        // invalidates controls outside this panel.
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            CheckMoved();
         }
     }
 
@@ -29,6 +72,10 @@ namespace PowerDial
         public Color Fill = Theme.Panel;
         public Color Border = Theme.Edge;
 
+        /// <summary>Draw the lit top edge. On for cards on the ground, off for cards
+        /// nested inside another card, where a second highlight just looks noisy.</summary>
+        public bool Lift = true;
+
         public Card()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
@@ -38,9 +85,18 @@ namespace PowerDial
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            Theme.Quality(e.Graphics);
+            Graphics g = e.Graphics;
+            Theme.Quality(g);
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-            Theme.FillRound(e.Graphics, r, Radius, Fill, Border);
+            Theme.FillRound(g, r, Radius, Fill, Border);
+
+            // one lit pixel along the top, the way a real panel catches the light. Cheaper
+            // and quieter than a drop shadow, and it survives being drawn on any ground.
+            if (Lift && Width > Radius * 2 + 4)
+            {
+                using (Pen p = new Pen(Theme.Hair, 1f))
+                    g.DrawLine(p, Radius, 1, Width - 1 - Radius, 1);
+            }
             base.OnPaint(e);
         }
     }
@@ -50,6 +106,15 @@ namespace PowerDial
     {
         public bool Primary;
         public bool Selected;
+
+        /// <summary>
+        /// Render as one tab in a strip rather than as a button: no chrome until it is
+        /// hovered or current, and the current one carries an underline on the strip's
+        /// baseline. Deliberately neutral - a green tab would spend an accent that means
+        /// "energy kept" on saying "you are here".
+        /// </summary>
+        public bool Tab;
+
         public string Glyph;              // optional Segoe Fluent Icons glyph
         bool _hot, _down;
 
@@ -74,13 +139,20 @@ namespace PowerDial
             g.Clear(BackColor);
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
 
+            if (Tab)
+            {
+                PaintTab(g);
+                return;
+            }
+
             Color fill, border, fg;
-            if (Selected)      { fill = Theme.Save;  border = Theme.Save;  fg = Theme.Ink; }
+            if (Selected)      { fill = Theme.Raise; border = Theme.Dim;   fg = Theme.Text; }
             else if (Primary)  { fill = Theme.Inset; border = Theme.Save;  fg = Theme.Save; }
             else               { fill = Theme.Inset; border = Theme.Edge;  fg = Theme.Text; }
 
             if (_down) fill = ControlPaint.Dark(fill, 0.06f);
             else if (_hot && !Selected) border = Theme.Save;
+            else if (_hot) fill = ControlPaint.Light(fill, 0.10f);
 
             Theme.FillRound(g, r, 8, fill, border);
 
@@ -103,6 +175,36 @@ namespace PowerDial
                 using (Pen p = new Pen(Theme.Save, 1f) { DashStyle = DashStyle.Dot })
                     g.DrawPath(p, Theme.Round(new Rectangle(2, 2, Width - 5, Height - 5), 6));
             }
+        }
+
+        /// <summary>One tab in the section strip. Quiet until it means something.</summary>
+        void PaintTab(Graphics g)
+        {
+            int bar = 2;                                  // the strip's baseline
+            Rectangle body = new Rectangle(0, 0, Width - 1, Height - bar - 2);
+
+            if (Selected) Theme.FillRound(g, body, 7, Theme.Raise);
+            else if (_hot) Theme.FillRound(g, body, 7, Theme.Inset);
+
+            Color fg = (Selected || _hot) ? Theme.Text : Theme.Dim;
+            SizeF ts = g.MeasureString(Text, Theme.Tab);
+            Theme.Str(g, Text, Theme.Tab, fg,
+                      (Width - ts.Width) / 2f, (body.Height - ts.Height) / 2f);
+
+            if (Selected)
+                using (SolidBrush b = new SolidBrush(Theme.Text))
+                    g.FillRectangle(b, 6, Height - bar, Math.Max(0, Width - 12), bar);
+
+            if (Focused)
+                using (Pen p = new Pen(Theme.Dim, 1f) { DashStyle = DashStyle.Dot })
+                    g.DrawPath(p, Theme.Round(new Rectangle(1, 1, Width - 3, body.Height - 2), 6));
+        }
+
+        /// <summary>Raise Click without a mouse. Mirrors SectionToggle.Toggle, so the
+        /// keyboard path and the tests drive a button the same way a click does.</summary>
+        public void Press()
+        {
+            OnClick(EventArgs.Empty);
         }
 
         protected override bool IsInputKey(Keys k)

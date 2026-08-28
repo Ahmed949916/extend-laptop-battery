@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj": {}
+    "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj": {}
   },
   "projects": {
-    "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj": {
+    "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj",
+        "projectUniqueName": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj",
         "projectName": "UiTest",
-        "projectPath": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj",
+        "projectPath": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial-uitest\\UiTest.csproj",
         "packagesPath": "C:\\Users\\hp\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial-uitest\\obj\\",
+        "outputPath": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial-uitest\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\hp\\AppData\\Roaming\\NuGet\\NuGet.Config"

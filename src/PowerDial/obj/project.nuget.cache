@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "O0UfM/PN5aUmXJUDDc3uMVexPNHL/AAy8y20NdpHv76JMK58OIQR8K9cuIE3lpZ2+8xMW4SqFtmx6aWB2tNLoA==",
+  "dgSpecHash": "uVKPb5qE1RjlnyIC0qjZI3DiwKcZnwXN1D7Y2uO0NQ/1jL7mAj071CGapdEOXE+uWarGe0bL3NSG0wlyfIEltA==",
   "success": true,
-  "projectFilePath": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj",
+  "projectFilePath": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\hp\\.nuget\\packages\\system.codedom\\6.0.0\\system.codedom.6.0.0.nupkg.sha512",
     "C:\\Users\\hp\\.nuget\\packages\\system.management\\6.0.0\\system.management.6.0.0.nupkg.sha512"

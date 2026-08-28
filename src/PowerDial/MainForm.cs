@@ -62,12 +62,25 @@ namespace PowerDial
         BatteryChart _batChart;
         ProcessTable _procTable, _offTable;
         StackBar _barWatts, _barHealth;
-        Label _healthNote, _histLabel, _procLabel, _procTotals;
+        Label _healthNote, _histLabel, _procLabel, _procTotals, _contribNote;
         PillButton _btnMem, _btnCpu, _btnBg;
+        Panel _contribList;
+        PillButton _fixRecheck;
 
         readonly ProcessWatch _procWatch = new ProcessWatch();
         List<ProcInfo> _procs = new List<ProcInfo>();
         RuntimeAverage _avg = new RuntimeAverage();
+
+        /// <summary>
+        /// Per-poll CPU, kept only for as long as the draw measurement window, so the
+        /// contributors list answers "what was busy while that reading was taken" rather
+        /// than "what is busy this instant". Deliberately core-seconds, never watts: a
+        /// background app holding the discrete GPU awake costs ~17 W at near-zero CPU, so
+        /// splitting the measured total by CPU share would point at the wrong process.
+        /// </summary>
+        class PollCpu { public DateTime At; public Dictionary<string, double> Core; }
+        readonly List<PollCpu> _window = new List<PollCpu>();
+        DateTime _lastPoll = DateTime.MinValue;
         bool _sortCpu;
         bool _bgOnly = true;
         DateTime _lastHistory = DateTime.MinValue;
@@ -76,6 +89,15 @@ namespace PowerDial
 
         NotifyIcon _tray;
         bool _loading;
+
+        /// <summary>
+        /// Named event a second launch sets to ask this copy to show its window. Lives here
+        /// rather than on Program because the test projects compile MainForm but not Program.
+        /// </summary>
+        public const string WakeEvent = "PowerDial.ShowWindow";
+
+        System.Threading.EventWaitHandle _wake;
+        bool _quitting, _saidWhereItWent;
 
         public MainForm()
         {
@@ -98,6 +120,7 @@ namespace PowerDial
             _poll.Tick += (s, e) => {
                 _bat.Poll();
                 _procs = _procWatch.Sample();
+                TrackWindowCpu();
                 PushSample();
                 RefreshReadout();
                 RefreshProcesses();
@@ -172,6 +195,7 @@ namespace PowerDial
             ClientSize = new Size(wantW, Math.Min(940, Math.Max(520, maxH)));
             CenterToScreen();
             Relayout();
+            ListenForRelaunch();
 
             // AutoScroll parks itself on whichever control takes focus, which pushed the
             // header card above the fold. Resetting inline is too early - the flow panel
@@ -270,12 +294,12 @@ namespace PowerDial
             };
             _fixApplyAll.Click += (s, e) => ApplyAllFixes();
             _fixButtons.Controls.Add(_fixApplyAll);
-            PillButton refix = new PillButton {
+            _fixRecheck = new PillButton {
                 Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(168, 3),
                 Size = new Size(126, 32), BackColor = Theme.Panel
             };
-            refix.Click += (s, e) => { LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); };
-            _fixButtons.Controls.Add(refix);
+            _fixRecheck.Click += (s, e) => { LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); };
+            _fixButtons.Controls.Add(_fixRecheck);
             _fixCard.Controls.Add(_fixButtons);
 
             _root.Controls.Add(_fixCard);
@@ -457,15 +481,30 @@ namespace PowerDial
                 Text = "Running now", Location = new Point(14, 10), Size = new Size(300, 18),
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel };
             pc.Controls.Add(_procLabel);
-            _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 322, 6), Size = new Size(98, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 218, 6), Size = new Size(80, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _btnBg = new PillButton { Text = "Background", Location = new Point(W - 132, 6), Size = new Size(118, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 400, 6), Size = new Size(98, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 296, 6), Size = new Size(80, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            _btnBg = new PillButton { Text = "Background", Location = new Point(W - 210, 6), Size = new Size(118, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            PillButton resetLive = new PillButton {
+                Text = "Reset", Glyph = Theme.GlyphRefresh, Location = new Point(W - 86, 6),
+                Size = new Size(72, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             _btnMem.Click += (s, e) => { _sortCpu = false; RefreshProcesses(); };
             _btnCpu.Click += (s, e) => { _sortCpu = true; RefreshProcesses(); };
             _btnBg.Click += (s, e) => { _bgOnly = !_bgOnly; RefreshProcesses(); };
+            // CPU here is a delta against the previous sample, so "reset" means forget that
+            // baseline: the next poll reads zero and everything after it is fresh.
+            resetLive.Click += (s, e) => {
+                _procWatch.ResetBaseline();
+                _window.Clear();
+                _lastPoll = DateTime.MinValue;
+                _procs = _procWatch.Sample();
+                RefreshProcesses();
+                RefreshContributors();
+                Log("Reset the live CPU baseline. The next reading starts from zero.");
+            };
             pc.Controls.Add(_btnMem);
             pc.Controls.Add(_btnCpu);
             pc.Controls.Add(_btnBg);
+            pc.Controls.Add(resetLive);
             _procTable = new ProcessTable {
                 Location = new Point(14, 40), Size = new Size(W - 30, ProcessTable.RowH * 9 + 22), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             pc.Controls.Add(_procTable);
@@ -482,6 +521,25 @@ namespace PowerDial
             oc.Controls.Add(new Label {
                 Text = "cumulative CPU time across every session", Location = new Point(176, 13),
                 AutoSize = true, Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel });
+            PillButton resetTally = new PillButton {
+                Text = "Reset tally", Glyph = Theme.GlyphUndo, Location = new Point(W - 132, 6),
+                Size = new Size(118, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            // this one destroys data that took weeks to accumulate, so it asks first
+            resetTally.Click += (s, e) => {
+                if (MessageBox.Show(
+                        "Clear the cumulative per-process tally?\n\n" +
+                        "This is the record of what has actually burned CPU across every session, " +
+                        "and it is what makes \"what has been eating the battery\" survive reboots. " +
+                        "Deleting it cannot be undone.\n\n" +
+                        "The per-minute history and its charts are not affected.",
+                        "Reset tally", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+                History.ClearOffenders();
+                RefreshOffenders();
+                RefreshHistory(false);
+                Log("Cleared the cumulative per-process tally. Counting starts again from now.");
+            };
+            oc.Controls.Add(resetTally);
             _offTable = new ProcessTable {
                 Location = new Point(14, 34), Size = new Size(W - 30, ProcessTable.RowH * 7 + 22),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, SortByCpu = true, CpuHeader = "cpu minutes", CpuSuffix = " min", CpuFormat = "0.0",
@@ -489,7 +547,7 @@ namespace PowerDial
             oc.Controls.Add(_offTable);
             _root.Controls.Add(oc);
 
-            Card wc2 = new Card { Width = W, Height = 104, Margin = new Padding(0, 0, 0, 10) };
+            Card wc2 = new Card { Width = W, Height = 268, Margin = new Padding(0, 0, 0, 10) };
             wc2.Controls.Add(new Label {
                 Text = "Where your watts go", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
@@ -497,6 +555,34 @@ namespace PowerDial
                 Location = new Point(14, 36), Size = new Size(W - 30, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Empty = "waiting for a reading on battery" };
             wc2.Controls.Add(_barWatts);
+
+            wc2.Controls.Add(new Label {
+                Text = "Busiest while that reading was taken", Location = new Point(14, 92), AutoSize = true,
+                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel });
+            _contribNote = new Label {
+                Location = new Point(14, 114), Size = new Size(W - 30, 32),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            wc2.Controls.Add(_contribNote);
+            _contribList = new Panel {
+                Location = new Point(14, 148), Size = new Size(W - 30, 108), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+            _contribList.Paint += (s, e) => PaintContributors(e.Graphics);
+            wc2.Controls.Add(_contribList);
+            InfoDot cdot = new InfoDot {
+                Location = new Point(W - 34, 94), Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Heading = "Busiest while that reading was taken",
+                Body = "The processes that burned the most CPU during the same window the watts figure " +
+                       "was timed over, so the two describe the same slice of time rather than the draw " +
+                       "from a minute ago and whatever happens to be busy this instant.\n\n" +
+                       "These are core-seconds, not watts, and that is deliberate. Splitting the measured " +
+                       "total across processes by CPU share would be a fabricated number, and it would " +
+                       "point at the wrong culprit: anything holding a discrete GPU awake costs upwards of " +
+                       "17 W while reporting almost no CPU at all. Use this to see what was working, then " +
+                       "A/B the draw itself to find out what a change is really worth.\n\n" +
+                       "The list empties when a setting changes, because the measurement window restarts."
+            };
+            wc2.Controls.Add(cdot);
             _root.Controls.Add(wc2);
 
             Card hc = new Card { Width = W, Height = 104, Margin = new Padding(0, 0, 0, 10) };
@@ -584,7 +670,9 @@ namespace PowerDial
 
             // built last: every section has to exist before the bar can point at them
             BuildNav();
-            _root.Scroll += (s, e) => MarkNav();
+            // Scrolled covers the wheel as well as the scrollbar - the stock Scroll event
+            // does not, so the strip used to go stale the moment anyone spun the wheel
+            _root.Scrolled += (s, e) => MarkNav();
         }
 
         /// <summary>
@@ -596,9 +684,18 @@ namespace PowerDial
         void BuildNav()
         {
             _navBar = new Panel {
-                Location = new Point(Chrome, _readout.Bottom + 8), Width = W, Height = 30,
+                Location = new Point(Chrome, _readout.Bottom + 10), Width = W, Height = 36,
                 BackColor = Theme.Ink,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            // The strip's baseline. Children paint over their parent, so the tabs are made
+            // two pixels shorter than the bar and this rule runs underneath them - drawn at
+            // the same height as the tabs it was hidden behind them, showing through only in
+            // the gaps as a row of dashes.
+            _navBar.Paint += (s, e) => {
+                Theme.Quality(e.Graphics);
+                using (Pen p = new Pen(Theme.Edge, 1f))
+                    e.Graphics.DrawLine(p, 0, _navBar.Height - 1, _navBar.Width - 4, _navBar.Height - 1);
             };
 
             string[] names = {
@@ -614,19 +711,23 @@ namespace PowerDial
                 if (!_sections.TryGetValue(names[i], out target)) continue;
 
                 Control local = target;
+                int tw;
+                using (Graphics g = CreateGraphics())
+                    tw = (int)Math.Ceiling(Theme.TextW(g, labels[i], Theme.Tab));
+
                 PillButton b = new PillButton {
-                    Text = labels[i], Location = new Point(x, 0),
-                    Size = new Size(ButtonWidth(labels[i]) - 34, 28), BackColor = Theme.Ink
+                    Text = labels[i], Tab = true, Location = new Point(x, 0),
+                    Size = new Size(Math.Max(62, tw + 26), _navBar.Height - 2), BackColor = Theme.Ink
                 };
                 b.Click += (s, e) => JumpTo(local);
                 _navBar.Controls.Add(b);
                 _navBtns.Add(b);
                 _navTargets.Add(local);
-                x += b.Width + 6;
+                x += b.Width + 2;
             }
 
             _chrome.Controls.Add(_navBar);
-            _chrome.Height = _navBar.Bottom + 8;
+            _chrome.Height = _navBar.Bottom + 10;
         }
 
         /// <summary>Scroll the column so a section sits just under the pinned header.</summary>
@@ -718,20 +819,28 @@ namespace PowerDial
             MarkNav();
         }
 
-        /// <summary>Section heading, with an info icon explaining the section itself.</summary>
+        /// <summary>
+        /// Section heading, with an info icon explaining the section itself.
+        ///
+        /// A rule across the column, then a generous gap, then the title - so a heading
+        /// reads as the start of something rather than as one more line of text. The gap
+        /// above is deliberately much larger than the gap below: that is what attaches a
+        /// heading to the cards under it instead of leaving it floating between two
+        /// sections, which is how the old 13px inline label read.
+        /// </summary>
         Panel Heading(string text, string sub, string info)
         {
             Panel host = new Panel {
-                Width = W, Height = 30, BackColor = Theme.Ink, Margin = new Padding(2, 6, 0, 2)
+                Width = W, Height = 46, BackColor = Theme.Ink, Margin = new Padding(2, 20, 0, 4)
             };
             _sections[text] = host;
 
             float tw;
-            using (Graphics g = CreateGraphics()) tw = Theme.TextW(g, text, Theme.Section);
+            using (Graphics g = CreateGraphics()) tw = Theme.TextW(g, text, Theme.Head);
 
             Label l = new Label {
-                Text = text, AutoSize = true, Location = new Point(0, 5),
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Ink
+                Text = text, AutoSize = true, Location = new Point(0, 18),
+                Font = Theme.Head, ForeColor = Theme.Text, BackColor = Theme.Ink
             };
             host.Controls.Add(l);
 
@@ -739,20 +848,21 @@ namespace PowerDial
             if (!string.IsNullOrEmpty(info))
             {
                 InfoDot d = new InfoDot {
-                    Location = new Point((int)(tw + 8), 5), Heading = text, Body = info, BackColor = Theme.Ink
+                    Location = new Point((int)(tw + 10), 22), Heading = text, Body = info, BackColor = Theme.Ink
                 };
                 host.Controls.Add(d);
-                subX = tw + 32;
+                subX = tw + 34;
             }
 
-            if (!string.IsNullOrEmpty(sub))
-            {
-                float sx = subX;
-                host.Paint += (s, e) => {
-                    Theme.Quality(e.Graphics);
-                    Theme.Str(e.Graphics, sub, Theme.Small, Theme.Dim, sx, 9);
-                };
-            }
+            float sx = subX;
+            host.Paint += (s, e) => {
+                Graphics g = e.Graphics;
+                Theme.Quality(g);
+                using (Pen p = new Pen(Theme.Edge, 1f))
+                    g.DrawLine(p, 0, 0, host.Width - 4, 0);
+                if (!string.IsNullOrEmpty(sub))
+                    Theme.Str(g, sub, Theme.Small, Theme.Dim, sx, 24);
+            };
             return host;
         }
 
@@ -779,7 +889,7 @@ namespace PowerDial
 
         Card BuildRow(Knob k)
         {
-            Card c = new Card { Width = W, Height = 92, Margin = new Padding(0, 0, 0, 8) };
+            Card c = new Card { Width = W, Height = 110, Margin = new Padding(0, 0, 0, 8) };
             Row row = new Row { Knob = k, Host = c };
 
             Label title = new Label {
@@ -853,15 +963,61 @@ namespace PowerDial
                 c.Controls.Add(row.Value);
             }
 
+            // Its own line under the control. Sharing the slider's row meant it sat behind
+            // the value caption and had to stay cryptically short; on a line of its own
+            // both sides of the setting fit, which is the point of showing them together.
             row.Status = new Label {
-                Text = "", Location = new Point(W - 236, 58), Size = new Size(222, 20),
+                Text = "", Location = new Point(14, 84), Size = new Size(W - 30, 18),
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel,
-                TextAlign = ContentAlignment.MiddleRight, Anchor = AnchorStyles.Top | AnchorStyles.Right
+                TextAlign = ContentAlignment.MiddleLeft,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(row.Status);
 
             _rows.Add(row);
             return c;
+        }
+
+        /// <summary>
+        /// Bring the window back, from the tray or from a second launch of the shortcut.
+        /// Restore before Activate: activating a minimised window leaves it minimised.
+        /// </summary>
+        void ShowFromTray()
+        {
+            Show();
+            if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
+            BringToFront();
+            Activate();
+        }
+
+        /// <summary>
+        /// Wait for a second launch to signal us. On its own thread because WaitOne blocks,
+        /// and marshalled back with BeginInvoke because touching the window from a worker
+        /// thread is not allowed. Started from OnShown - in the constructor the handle does
+        /// not exist yet and BeginInvoke throws.
+        /// </summary>
+        void ListenForRelaunch()
+        {
+            bool mine;
+            try
+            {
+                _wake = new System.Threading.EventWaitHandle(
+                    false, System.Threading.EventResetMode.AutoReset, WakeEvent, out mine);
+            }
+            catch (Exception) { return; }
+
+            System.Threading.Thread t = new System.Threading.Thread(delegate ()
+            {
+                while (true)
+                {
+                    try { _wake.WaitOne(); } catch (Exception) { return; }
+                    if (_quitting) return;
+                    try { BeginInvoke(new Action(ShowFromTray)); }
+                    catch (Exception) { return; }
+                }
+            });
+            t.IsBackground = true;      // must never hold the process open
+            t.Start();
         }
 
         void BuildTray()
@@ -874,16 +1030,47 @@ namespace PowerDial
             }
             menu.Items.Add("Restore my settings", null, (s, e) => RestoreBaseline());
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Open PowerDial", null, (s, e) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
-            menu.Items.Add("Quit", null, (s, e) => { _tray.Visible = false; Application.Exit(); });
+            menu.Items.Add("Open PowerDial", null, (s, e) => ShowFromTray());
+            menu.Items.Add("Quit PowerDial", null, (s, e) => Quit());
 
             _tray = new NotifyIcon { Icon = Icon, Visible = true, Text = "PowerDial", ContextMenuStrip = menu };
-            _tray.DoubleClick += (s, e) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
+            _tray.DoubleClick += (s, e) => ShowFromTray();
+        }
+
+        /// <summary>Actually exit, rather than hide. The tray menu and nothing else.</summary>
+        void Quit()
+        {
+            _quitting = true;
+            if (_wake != null) { try { _wake.Set(); } catch (Exception) { } }
+            if (_tray != null) _tray.Visible = false;
+            Application.Exit();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); return; }
+            if (e.CloseReason == CloseReason.UserClosing && !_quitting)
+            {
+                e.Cancel = true;
+                Hide();
+
+                // Say where it went, once. Otherwise closing the window looks like quitting,
+                // and the app is left running with no obvious way back to it.
+                if (!_saidWhereItWent && _tray != null)
+                {
+                    _saidWhereItWent = true;
+                    try
+                    {
+                        _tray.ShowBalloonTip(4000, "PowerDial is still running",
+                            "It keeps recording here in the notification area. Open it again from the " +
+                            "shortcut or this icon, and use Quit PowerDial to close it for good.",
+                            ToolTipIcon.Info);
+                    }
+                    catch (Exception) { }
+                }
+                return;
+            }
+            _quitting = true;
+            if (_wake != null) { try { _wake.Set(); } catch (Exception) { } }
             History.SaveOffenders();
             if (_tray != null) _tray.Visible = false;
             base.OnFormClosing(e);
@@ -902,7 +1089,11 @@ namespace PowerDial
                     int? ac = PowerCfg.Read(r.Knob, false);
                     bool expl = PowerCfg.IsExplicit(r.Knob, true);
 
-                    r.Status.Text = (expl ? "" : "inherited  ") + "plugged in: " + PowerCfg.Describe(r.Knob, ac);
+                    // Both sides, side by side. Only the battery one is ever written - the
+                    // plugged-in figure is here to compare against, never to change.
+                    r.Status.Text =
+                        "on battery  " + PowerCfg.Describe(r.Knob, v) + (expl ? "" : "  (inherited)") +
+                        "        plugged in  " + PowerCfg.Describe(r.Knob, ac) + "  (not touched)";
 
                     if (!v.HasValue) continue;
                     if (r.Combo != null)
@@ -1058,6 +1249,46 @@ namespace PowerDial
             return s;
         }
 
+        /// <summary>Record this poll's CPU and drop anything older than the draw window.</summary>
+        void TrackWindowCpu()
+        {
+            DateTime now = DateTime.UtcNow;
+            double secs = _lastPoll == DateTime.MinValue ? 0 : (now - _lastPoll).TotalSeconds;
+            _lastPoll = now;
+            if (secs <= 0.5 || secs > 300) return;      // first poll, or we were asleep
+
+            Dictionary<string, double> core = new Dictionary<string, double>();
+            foreach (ProcInfo p in _procs)
+            {
+                if (p.CpuPercent <= 0.05) continue;
+                core[p.Name] = p.CpuPercent / 100.0 * secs;
+            }
+            _window.Add(new PollCpu { At = now, Core = core });
+
+            while (_window.Count > 0 &&
+                   (now - _window[0].At).TotalSeconds > _bat.WindowSeconds + 5)
+                _window.RemoveAt(0);
+        }
+
+        /// <summary>What burned the most CPU across the retained window, core-seconds.</summary>
+        List<KeyValuePair<string, double>> WindowTop(int take)
+        {
+            Dictionary<string, double> sum = new Dictionary<string, double>();
+            foreach (PollCpu s in _window)
+                foreach (KeyValuePair<string, double> kv in s.Core)
+                {
+                    double had;
+                    sum.TryGetValue(kv.Key, out had);
+                    sum[kv.Key] = had + kv.Value;
+                }
+
+            List<KeyValuePair<string, double>> list = new List<KeyValuePair<string, double>>(sum);
+            list.Sort(delegate (KeyValuePair<string, double> a, KeyValuePair<string, double> b)
+            { return b.Value.CompareTo(a.Value); });
+            if (list.Count > take) list.RemoveRange(take, list.Count - take);
+            return list;
+        }
+
         void PushSample()
         {
             if (!_bat.OnAc && _bat.Watts.HasValue && _bat.Watts.Value > 0)
@@ -1125,11 +1356,60 @@ namespace PowerDial
             PushAverage();
             _readout.Invalidate();
             RefreshAnalytics();
+            RefreshContributors();
 
             string tip = "PowerDial  " + (_bat.OnAc ? "on AC" :
                 (_bat.Watts.HasValue ? _bat.Watts.Value.ToString("0.0") + " W" : "measuring")) +
                 "  " + _bat.PercentOfFull + "%";
             if (_tray != null) _tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+        }
+
+        /// <summary>
+        /// The contributors list: core-seconds per process across the measurement window,
+        /// drawn as a share bar. No watt figures, on purpose - see the info text.
+        /// </summary>
+        void PaintContributors(Graphics g)
+        {
+            Theme.Quality(g);
+            g.Clear(Theme.Panel);
+
+            List<KeyValuePair<string, double>> top = WindowTop(5);
+            if (top.Count == 0)
+            {
+                Theme.Str(g, _bat.OnAc
+                    ? "nothing timed yet - readings only happen on battery"
+                    : "collecting - the first window takes " + _bat.WindowSeconds + " seconds",
+                    Theme.Small, Theme.Dim, 0, 4);
+                return;
+            }
+
+            double max = top[0].Value;
+            if (max <= 0) max = 1;
+            int y = 0;
+            foreach (KeyValuePair<string, double> kv in top)
+            {
+                int barW = (int)Math.Round(kv.Value / max * (_contribList.Width - 210));
+                if (barW < 2) barW = 2;
+                Theme.FillRound(g, new Rectangle(150, y + 5, barW, 10), 3, Theme.Spend);
+                Theme.Str(g, kv.Key, Theme.Body, Theme.Text, 0, y);
+                Theme.StrRight(g, kv.Value.ToString("0.0") + " cpu-s", Theme.Small, Theme.Dim,
+                               _contribList.Width, y + 2);
+                y += 21;
+            }
+        }
+
+        void RefreshContributors()
+        {
+            if (_contribList == null) return;
+            int secs = 0;
+            if (_window.Count > 0)
+                secs = (int)Math.Round((DateTime.UtcNow - _window[0].At).TotalSeconds);
+            _contribNote.Text = _window.Count == 0
+                ? "Ranked by CPU over the same window the watts figure was timed across. Not watts - " +
+                  "an idle-but-awake GPU costs far more than anything here while using no CPU."
+                : "Over the last " + secs + "s, the window the watts figure was timed across. " +
+                  "Core-seconds, not watts - what was working, not what it cost.";
+            _contribList.Invalidate();
         }
 
         void RefreshWatch()
@@ -1218,6 +1498,11 @@ namespace PowerDial
             _fixApplyAll.Visible = applicable > 1;
             _fixApplyAll.Text = applicable == 2 ? "Apply both" : "Apply all " + applicable;
 
+            // Check again sits after Apply all, or takes its place when there is nothing to
+            // apply. Left at a fixed offset it floated in from the edge with a gap beside
+            // it, which read as a mistake every time the list came back empty.
+            _fixRecheck.Left = _fixApplyAll.Visible ? _fixApplyAll.Right + 8 : 0;
+
             if (_fixes.Count == 0)
             {
                 _fixSummary.ForeColor = Theme.Save;
@@ -1246,7 +1531,8 @@ namespace PowerDial
             int w = _fixList.Width;
             Card c = new Card {
                 Location = new Point(0, y), Size = new Size(w, 100),
-                Fill = Theme.Inset, Border = Theme.Edge, Radius = 8, BackColor = Theme.Panel
+                Fill = Theme.Inset, Border = Theme.Edge, Radius = 8, BackColor = Theme.Panel,
+                Lift = false          // nested inside a card already; a second highlight is noise
             };
 
             Label title = new Label {
@@ -1423,17 +1709,22 @@ namespace PowerDial
         {
             BaselineFile bf = Baseline.Load();
             string when = bf.CapturedUtc == "(none)" ? "the tuning session" : bf.CapturedUtc + " UTC";
+            string bright = bf.Brightness.HasValue
+                ? "Screen brightness goes back to " + bf.Brightness.Value + "%.\n"
+                : "Screen brightness is left alone - this restore point predates the app\n" +
+                  "recording it, so there is no level to go back to.\n";
             DialogResult r = MessageBox.Show(
                 "Put back the battery settings as they were before PowerDial?\n\n" +
                 "Restore point: " + when + "\n" +
-                bf.Entries.Count + " settings will be rewritten.\n\n" +
-                "Your plugged-in settings and screen brightness are not touched.",
+                bf.Entries.Count + " settings will be rewritten.\n" +
+                bright + "\n" +
+                "Your plugged-in settings are not touched.",
                 "Restore my settings", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
             foreach (string line in Baseline.Restore()) Log(line);
             foreach (PillButton b in _presetBtns) b.Selected = false;
-            _bat.ResetWindow(); _spark.Clear();
+            _bat.ResetWindow(); _spark.Clear(); _window.Clear();
             LoadValues(); RefreshWatch(); RefreshFixes(); ShowLog();
         }
 
@@ -1544,11 +1835,28 @@ namespace PowerDial
             float bw = Theme.TextW(g, big, Theme.Readout);
             Theme.Str(g, unit, Theme.Small, Theme.Dim, 18, 56);
 
-            float x = Math.Max(180, 14 + bw + 26);
-            Stat(g, x, Remaining.HasValue ? Fmt(Remaining.Value) : "--", "left", Theme.Text);
-            Stat(g, x + 118, ChargePct + "%", "charge", Theme.Text);
-            Stat(g, x + 222, Health.HasValue ? Health.Value.ToString("0") + "%" : "--", "health",
-                 Health.HasValue && Health.Value < 70 ? Theme.Spend : Theme.Text);
+            // Four readings on an even grid across the header, the way an instrument
+            // cluster is laid out. Clustered left they left a dead gap across the middle
+            // once the window could be resized; clustered right they left it on the left
+            // and crowded the state line. A grid fills the row at any width.
+            string[] vals = {
+                Remaining.HasValue ? Fmt(Remaining.Value) : "--",
+                ChargePct + "%",
+                Health.HasValue ? Health.Value.ToString("0") + "%" : "--"
+            };
+            string[] labs = { "left", "charge", "health" };
+            Color[] cols = {
+                Theme.Text, Theme.Text,
+                Health.HasValue && Health.Value < 70 ? Theme.Spend : Theme.Text
+            };
+
+            float col = (Width - 28) / 4f;
+            for (int i = 0; i < 3; i++)
+            {
+                // never let a long watts figure run into the first column
+                float sx = Math.Max(14 + bw + 30, 14 + col * (i + 1));
+                Stat(g, sx, vals[i], labs[i], cols[i]);
+            }
 
             string state = OnAc ? (Charging ? "on AC, charging" : "on AC") : "on battery";
             if (Mwh.HasValue && FullMwh.HasValue) state += "   ·   " + Mwh.Value.ToString("N0") + " of " + FullMwh.Value.ToString("N0") + " mWh";
@@ -1607,8 +1915,10 @@ namespace PowerDial
 
         void Stat(Graphics g, float x, string v, string label, Color c)
         {
-            Theme.Str(g, v, Theme.Stat, c, x, 14);
-            Theme.Str(g, label, Theme.Small, Theme.Dim, x + 2, 40);
+            // 11/37 rather than 14/40: it lifts the caption clear of the state line, which
+            // shares its row with the unit at the far left
+            Theme.Str(g, v, Theme.Stat, c, x, 11);
+            Theme.Str(g, label, Theme.Small, Theme.Dim, x + 2, 37);
         }
 
         static string Fmt(double h)

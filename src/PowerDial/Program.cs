@@ -22,8 +22,24 @@ namespace PowerDial
             {
                 if (!created)
                 {
-                    MessageBox.Show("PowerDial is already running. Look for it in the notification area.",
-                                    "PowerDial", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Hand the running copy the job of showing itself, rather than telling
+                    // the user to go hunting. Closing the window only hides it, so the
+                    // shortcut is how most people expect to get back - and if the tray icon
+                    // has been tucked into the overflow, being told to look there is a dead
+                    // end. Launching again now simply raises the window that already exists.
+                    try
+                    {
+                        using (EventWaitHandle wake = EventWaitHandle.OpenExisting(MainForm.WakeEvent))
+                            wake.Set();
+                    }
+                    catch (WaitHandleCannotBeOpenedException)
+                    {
+                        // running, but too early to listen yet, or a copy from before this
+                        // existed - fall back to saying where it is
+                        MessageBox.Show("PowerDial is already running. Look for it in the notification area.",
+                                        "PowerDial", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception) { }
                     return;
                 }
                 Application.EnableVisualStyles();

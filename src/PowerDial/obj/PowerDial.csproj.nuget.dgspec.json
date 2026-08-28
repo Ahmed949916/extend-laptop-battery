@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj": {}
+    "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj": {}
   },
   "projects": {
-    "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj": {
+    "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj",
+        "projectUniqueName": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj",
         "projectName": "PowerDial",
-        "projectPath": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj",
+        "projectPath": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\PowerDial.csproj",
         "packagesPath": "C:\\Users\\hp\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\hp\\OneDrive\\Desktop\\control-battery\\src\\PowerDial\\obj\\",
+        "outputPath": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\hp\\AppData\\Roaming\\NuGet\\NuGet.Config"

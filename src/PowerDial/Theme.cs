@@ -24,6 +24,13 @@ namespace PowerDial
         public static readonly Color Save   = Color.FromArgb(0x4F, 0xD6, 0xA9);  // watts kept
         public static readonly Color Alert  = Color.FromArgb(0xF2, 0x70, 0x5E);  // regression
 
+        // Two more steps up the same neutral ramp - Ink, Panel, Inset, Raise - not a third
+        // accent. They exist so "this surface is raised" and "this tab is the current one"
+        // can be said without spending amber or green, which carry meaning about energy and
+        // must not be diluted into decoration.
+        public static readonly Color Raise  = Color.FromArgb(0x28, 0x30, 0x3C);  // hover, current tab
+        public static readonly Color Hair   = Color.FromArgb(0x36, 0x3F, 0x4C);  // lit top edge of a card
+
         // Bahnschrift is Windows' DIN derivative - an engineering face, not the Segoe
         // default. Used for anything numeric or instrument-like.
         public const string DisplayFamily = "Bahnschrift SemiBold Condensed";
@@ -35,6 +42,8 @@ namespace PowerDial
         public static readonly Font Readout   = new Font(DisplayFamily, 44f, FontStyle.Regular, GraphicsUnit.Pixel);
         public static readonly Font Stat      = new Font(DisplayFamily, 21f, FontStyle.Regular, GraphicsUnit.Pixel);
         public static readonly Font Section   = new Font(LabelFamily, 13f, FontStyle.Regular, GraphicsUnit.Pixel);
+        public static readonly Font Head      = new Font(LabelFamily, 16f, FontStyle.Regular, GraphicsUnit.Pixel);
+        public static readonly Font Tab       = new Font(BodyFamily, 12f, FontStyle.Regular, GraphicsUnit.Pixel);
         public static readonly Font Title     = new Font(BodyFamily, 12.5f, FontStyle.Regular, GraphicsUnit.Pixel);
         public static readonly Font Body      = new Font(BodyFamily, 11.5f, FontStyle.Regular, GraphicsUnit.Pixel);
         public static readonly Font Small     = new Font(BodyFamily, 10.5f, FontStyle.Regular, GraphicsUnit.Pixel);

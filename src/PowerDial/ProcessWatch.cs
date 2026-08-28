@@ -39,6 +39,16 @@ namespace PowerDial
             try { _selfId = Process.GetCurrentProcess().Id; } catch { _selfId = -1; }
         }
 
+        /// <summary>
+        /// Forget the previous snapshot so CPU starts measuring from now. The next Sample
+        /// therefore reports zero CPU, exactly like the first one after launch, and every
+        /// call after that is a real delta again.
+        /// </summary>
+        public void ResetBaseline()
+        {
+            _prev.Clear();
+        }
+
         /// <summary>Grouped by executable name, because Chrome as 14 processes is one
         /// thing the user recognises, not fourteen.</summary>
         public List<ProcInfo> Sample()

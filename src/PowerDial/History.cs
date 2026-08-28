@@ -144,6 +144,22 @@ namespace PowerDial
             catch { }
         }
 
+        /// <summary>
+        /// Throw away the cumulative tally and start counting again. Destructive on
+        /// purpose - the whole value of this file is that it survives reboots, so the
+        /// caller confirms before calling. The per-minute history is left alone.
+        /// </summary>
+        public static void ClearOffenders()
+        {
+            lock (Gate)
+            {
+                _offenders = new Dictionary<string, Offender>();
+                _sinceFlush = 0;
+                try { if (File.Exists(OffendersFile)) File.Delete(OffendersFile); }
+                catch { }
+            }
+        }
+
         /// <summary>Cumulative worst offenders, most core-seconds first.</summary>
         public static List<Offender> TopOffenders(int take, bool backgroundOnly)
         {

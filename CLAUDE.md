@@ -19,7 +19,7 @@ the code.
     dotnet publish -c Release -o ..\..                  publish over the runnable copy
 
     cd src\PowerDial-selftest && dotnet run -c Release   read-only, checks the live machine
-    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 61 checks
+    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 66 checks
 
 .NET 6 SDK (6.0.428), `net6.0-windows`, `UseWindowsForms`. NuGet works; only dependency is
 `System.Management`. `msbuild` is not on PATH — use `dotnet build`.
@@ -212,6 +212,26 @@ Two things follow, and both are baked into the code:
   width explicitly by `Relayout`; the controls *inside* each card are anchored and follow on
   their own. Buttons are skipped — stretching *Run as admin* across the column made it look
   like the primary action.
+- **Setting `AutoScrollPosition` in code raises neither `Scroll` nor a wheel event**, and
+  the stock `Scroll` event does not fire for the wheel either. Anything that tracks the view
+  must watch the *position*, not the cause — which is what `SteadyPanel.CheckMoved` does.
+  `Scrolled` is raised from `OnScroll`, `OnMouseWheel` and `OnPaint`, and the position
+  compare makes calling it from anywhere free.
+- **`OnShown` parks the column at the top 60 ms after `Show`** so the header cannot open
+  below the fold. A test that scrolls before that timer lands gets yanked back to the top
+  mid-assertion — pump events for ~200 ms first. This is what made the section-bar checks
+  pass or fail on timing.
+- **A child control paints over its parent.** The section strip's baseline rule is drawn by
+  the bar, so the tabs are two pixels shorter than it; drawn at equal height the rule hid
+  behind them and showed through only in the gaps, as a row of dashes.
+- **A tray app that only hides on close needs a way back in.** Closing the window hides it,
+  so the shortcut is what people reach for next — and the single-instance guard used to
+  answer with a message box telling them to look in the notification area, which is a dead
+  end when the icon is in the overflow. A second launch now sets the named event
+  `MainForm.WakeEvent` and exits; the running copy waits on it and shows itself. The wait is
+  on a background thread — `WaitOne` blocks — and marshals back with `BeginInvoke`, started
+  from `OnShown` because in the constructor there is no handle yet. The first hide also
+  balloons once to say where the window went and how to quit for good.
 
 ## The window
 
@@ -225,6 +245,16 @@ One scrolling column, about three screens long, with two things pinned above it 
   tab. That is partly principle and partly the test suite: it toggles *Basic settings* and
   asserts `Visible` flips, and `Control.Visible` is false whenever an ancestor is hidden, so
   putting sections on separate pages would break it. Keep every section on the one page.
+- **The current tab follows the scroll**, both ways, and clicking one scrolls there. Tests
+  cover all of it. `MarkNav` picks the last section whose top has passed the viewport top.
+- **The active tab is neutral, not green.** `PillButton.Tab` renders a tab strip: `Dim`
+  until hovered or current, then `Raise` plus an underline on the bar's baseline. Amber and
+  green mean energy leaving and energy kept; spending green on "you are here" would dilute
+  the only two colours in here that carry data. `Selected` on ordinary buttons went neutral
+  for the same reason.
+- **Section headings are a rule, a gap, then a 16px title.** The gap above is much larger
+  than the gap below — that is what attaches a heading to the cards under it. As a 13px
+  inline label it read as one more line of text floating between two sections.
 - **`Relayout` stretches the design width to the window** and caps the column at `WMax`; a
   chart three thousand pixels wide is wider, not clearer. Everything is still built once at
   `W`, so all the geometry arithmetic stays in one place.
@@ -237,7 +267,10 @@ One scrolling column, about three screens long, with two things pinned above it 
   a trailing `\` before a newline gets eaten as a line continuation, and `\\n` collapses to
   a real newline inside string literals. Use the file-writing tool for `.cs` files.
 - `Theme.cs` owns the palette and type. Two accents carry meaning: **amber is energy
-  leaving, green is energy kept.** Do not add a third decorative colour.
+  leaving, green is energy kept.** Do not add a third decorative colour. `Raise` and `Hair`
+  are two more steps up the same neutral ramp as Ink/Panel/Inset, not accents — they exist
+  so "this surface is raised" and "this tab is current" can be said without spending amber
+  or green on decoration.
 - Settings are split by `Knob.Basic`: `false` = changes draw while in use (shown), `true` =
   timeouts and lid behaviour (collapsed under *Basic settings*).
 - Every `Knob` needs an `Info` string; a test fails if one is missing or under 80 chars.

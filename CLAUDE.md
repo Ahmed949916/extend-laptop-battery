@@ -38,20 +38,15 @@ rebuild the portable exe → launch it and look at the window.
 .NET 10 SDK, pinned by `global.json` to 10.0.400 with `rollForward: latestFeature`.
 `net10.0-windows`, `UseWindowsForms`. `msbuild` is not on PATH — use `dotnet build`.
 
-**Build settings live at the repo root, not in the .csproj files.** `Directory.Build.props`
-holds the target framework, the plain-C# switches, the analyzer settings and the whole
-`NoWarn` list with the reasoning for each suppression; `Directory.Packages.props` holds the
-one package version centrally. Both .csproj files used to carry their own copy of all of
-it, and since the selftest compiles the app's own code, the two drifting apart meant
-building the same source under different rules. `PowerDial.slnx` ties them together — build
-from the root and both are covered.
+**Build settings live at the repo root, not in the .csproj files.**
+`Directory.Build.props` holds the target framework, the plain-C# switches, the analyzer
+settings and the `NoWarn` list; `Directory.Packages.props` holds package versions.
+`PowerDial.slnx` ties both projects together.
 
-**Warnings are errors.** The build is clean, so a new warning is news rather than noise.
-Suppressions go in the `NoWarn` list at the root, with a comment saying why — never a
-`#pragma` at the call site.
+**Warnings are errors.** Suppressions go in the root `NoWarn` list with a comment saying
+why — never a `#pragma` at the call site.
 
-**The selftest references the app project.** It used to list the app's source files
-one by one, which went stale silently every time the app gained a file. It enables
+**The selftest references the app project**, so it cannot go stale. It enables
 `UseWindowsForms` only because the app it references is a WinExe.
 
 **Run the selftest after any change.** It is read-only and takes about half a minute.
@@ -63,21 +58,16 @@ button, explains itself in 80+ characters, and quotes no unmeasured saving; ever
 references only knobs that exist; and the live battery window fills and resets. It does
 **not** touch the window, the widgets, the tray, persistence or the restore point.
 
-**Quit the running copy first** if anything writes `offenders.json`. Two processes each
-save from their own in-memory tally, so whichever writes last wins and the file can come
-out smaller than it went in.
+**Quit the running copy first** if anything writes `offenders.json` — two processes each
+save their own in-memory tally and the last writer wins.
 
-**There is no UI test any more.** It drove the real form and asserted its structure, and it
-was removed to cut maintenance: every feature change meant updating it. Nothing now checks
-the window builds, so build and open the app after touching `MainForm` or `Widgets`.
+**Nothing checks that the window builds.** There is no UI test, so open the app after
+touching `MainForm` or `Widgets`.
 
-**Never publish straight into the repo root.** `dotnet publish -o ..\..` used to work and now
-fails with `CS5001: Program does not contain a static 'Main'`, which is a genuinely
-confusing way to say what went wrong. The SDK's default compile glob excludes everything
-under `$(PublishDir)`; point that at the repo root and the exclusion swallows the whole
-repository, `Program.cs` included, so the compiler is handed zero source files. `dotnet
-build` is unaffected because it never sets `PublishDir`. Publish to a directory outside the
-project and copy the payload in — that is what the two commands above do.
+**Never publish into the repo root.** `dotnet publish -o ..\..` fails with `CS5001: Program
+does not contain a static 'Main'`: the SDK excludes everything under `$(PublishDir)` from
+compilation, so pointing it at the root hides every source file. Publish elsewhere and copy
+the payload in.
 
 ## Changing things
 
@@ -127,7 +117,7 @@ editing the XML.
 ## Hard invariants — do not break these
 
 1. **The DC (on-battery) side is the default, and the only side anything writes by
-   itself.** The advisor, the three profiles and the restore point are all about battery
+   itself.** The advisor, the profiles and the restore point are all about battery
    life and call `PowerCfg.WriteDc` exclusively — none of them may ever touch AC. The one
    exception is deliberate and user-driven: the *Plugged in* switch in the settings
    section, which routes that section's edits through `PowerCfg.WriteAc`. It is opt-in,
@@ -233,12 +223,8 @@ Rules that matter here:
 - Process sampling costs about **0.2% of a core**, taking the app from 0.16% to ~0.36%.
   If that grows, sample processes less often than the battery.
 
-**There are no modelled analytics.** A `CurveChart` predicting runtime-vs-brightness from
-three hardcoded workload constants used to live in `Charts.cs`; it was removed because it
-described a laptop in the abstract rather than the one in front of you. What replaced it is
-`Model.WattsPerPoint`, which returns `Config.BacklightWattsPerPoint` — a value measured on
-this PC or `null` — and is applied to the live reading to split the current draw, not to
-predict one. Do not reintroduce modelled numbers as analytics.
+**There are no modelled analytics.** Nothing here predicts a figure from workload
+constants. Every number shown is measured on this machine or is not shown at all.
 
 **`RuntimeAverage` is not a model either, and the distinction matters.** `Runtime.cs` takes
 the recorded points, keeps the ones that were on battery and actually drawing, and divides
@@ -286,54 +272,41 @@ Two things follow, and both are baked into the code:
   enough to hold it awake. An earlier version summed them and badly overstated the total.
 - Never reason about power from CPU%. A/B a drain measurement instead.
 
-## WinForms traps already hit here — do not reintroduce
+## WinForms rules — do not reintroduce
 
-- **A focused `TrackBar` swallows the mouse wheel** and moves its own thumb, silently
-  rewriting a system setting when the user meant to scroll. Every control refuses the
-  wheel. Use `Slider` / `Picker`, never stock `TrackBar` / `ComboBox`. Nothing enforces this
-  since the UI test was removed, so it is on review.
-- **Committing on `MouseUp` loses wheel and keyboard changes**, so the UI drifted out of
-  sync with the registry (slider showed 90, registry held 80). Commits are debounced 600 ms
-  after *any* value change.
-- **`AutoScroll` panels call `ScrollToControl` on every focus change**, which kept scrolling
-  the header out of view. `SteadyPanel` overrides it.
-- **`BeginInvoke` in a Form constructor throws** — the handle does not exist yet. Do
-  window-position work in `OnShown`.
-- **An `AutoSize` Card wrapping a docked `AutoSize` panel** made the form open full-screen
-  and paint a section twice. Prefer explicit heights.
-- **Constructing a `ManagementObjectSearcher` per poll cost 3.75% of a CPU core.** Build
-  once, reuse. Poll every 15 s against the 60 s window. Now ~0.16%.
-- **`"0.1"` is not a one-decimal format string** in .NET — only `0` and `#` are digit
-  placeholders. It rendered 43.905 as "441". Use `"0.0"`.
-- **Docking a Fill panel next to a Top panel depends on z-order**, which is easy to get
-  backwards and silently paints one over the other. The header and the scroll column use
-  explicit bounds plus `Anchor` instead, so the order they are added to `Controls` decides
-  nothing about layout. It still decides `Controls[0]`, which the removed UI test read as
-  the scroll column — harmless now, but keep adding **`_root` to the form first** anyway.
-- **A `FlowLayoutPanel` ignores `Anchor` on its own children.** Cards are therefore given a
-  width explicitly by `Relayout`; the controls *inside* each card are anchored and follow on
-  their own. Buttons are skipped — stretching *Run as admin* across the column made it look
-  like the primary action.
-- **Setting `AutoScrollPosition` in code raises neither `Scroll` nor a wheel event**, and
-  the stock `Scroll` event does not fire for the wheel either. Anything that tracks the view
-  must watch the *position*, not the cause — which is what `SteadyPanel.CheckMoved` does.
-  `Scrolled` is raised from `OnScroll`, `OnMouseWheel` and `OnPaint`, and the position
-  compare makes calling it from anywhere free.
-- **`OnShown` parks the column at the top 60 ms after `Show`** so the header cannot open
-  below the fold. Anything that scrolls the column programmatically within that window gets
-  yanked back to the top — wait ~200 ms first. This is what made the old UI test's
-  section-bar checks pass or fail on timing.
-- **A child control paints over its parent.** The section strip's baseline rule is drawn by
-  the bar, so the tabs are two pixels shorter than it; drawn at equal height the rule hid
-  behind them and showed through only in the gaps, as a row of dashes.
-- **A tray app that only hides on close needs a way back in.** Closing the window hides it,
-  so the shortcut is what people reach for next — and the single-instance guard used to
-  answer with a message box telling them to look in the notification area, which is a dead
-  end when the icon is in the overflow. A second launch now sets the named event
-  `MainForm.WakeEvent` and exits; the running copy waits on it and shows itself. The wait is
-  on a background thread — `WaitOne` blocks — and marshals back with `BeginInvoke`, started
-  from `OnShown` because in the constructor there is no handle yet. The first hide also
-  balloons once to say where the window went and how to quit for good.
+Each of these is a constraint the code depends on, not a preference.
+
+- **Every control refuses the mouse wheel.** A focused `TrackBar` swallows it and moves its
+  own thumb, rewriting a system setting when someone meant to scroll. Use `Slider` /
+  `Picker`, never stock `TrackBar` / `ComboBox`. Nothing enforces this — it is on review.
+- **Commit 600 ms after any value change**, never on `MouseUp`, or wheel and keyboard edits
+  never reach the registry and the UI starts lying about the machine.
+- **`SteadyPanel`, not `AutoScroll`.** `AutoScroll` panels call `ScrollToControl` on every
+  focus change and scroll the header out of view.
+- **Track scroll by position, not by event.** Setting `AutoScrollPosition` in code raises
+  nothing, and the stock `Scroll` event does not fire for the wheel. `SteadyPanel.CheckMoved`
+  compares the position, which is why calling it from anywhere is free.
+- **No `BeginInvoke` in a Form constructor** — there is no handle yet. Window-position work
+  goes in `OnShown`.
+- **`OnShown` parks the column at the top 60 ms after `Show`.** Anything scrolling the column
+  programmatically must wait ~200 ms or it gets yanked back.
+- **Give cards explicit heights.** An `AutoSize` Card wrapping a docked `AutoSize` panel
+  opens the form full-screen and paints a section twice.
+- **A `FlowLayoutPanel` ignores `Anchor` on its own children,** so `Relayout` sets card
+  widths explicitly; controls *inside* a card anchor normally. Buttons keep their own width.
+- **Lay the chrome out with explicit bounds plus `Anchor`, not `Dock`** — docking a Fill
+  panel beside a Top panel depends on z-order and silently paints one over the other. Add
+  `_root` to the form first.
+- **A child paints over its parent,** so the nav tabs are 2px shorter than the bar that
+  draws the baseline rule under them.
+- **Build `ManagementObjectSearcher` once and reuse it.** Per-poll construction cost 3.75%
+  of a core; it is ~0.16% now. Poll every 15 s against the 60 s window.
+- **`"0.1"` is not a one-decimal format string** — only `0` and `#` are digit placeholders,
+  and it renders 43.905 as "441". Use `"0.0"`.
+- **A second launch must reach the running copy.** Closing hides to the tray, so relaunching
+  is what people do next. The second instance sets the named event `MainForm.WakeEvent` and
+  exits; the running copy waits on it from a background thread (`WaitOne` blocks) and
+  marshals back with `BeginInvoke`, started from `OnShown`.
 
 ## The window
 
@@ -342,32 +315,25 @@ One scrolling column, about three screens long, with three things pinned above i
 bar of section buttons.
 
 - **The header does not scroll.** Draw, what is left, charge, health and the measured
-  average are why the app is open; they used to leave the screen within one flick of the
-  wheel, so you could not see the effect of the control you had just moved.
+  average are why the app is open, so they stay on screen while you move a control.
 - **Nor does *Where your watts go*.** It sits directly under the header because the two
-  describe the same measurement window and are meant to be read together; as a card a screen
-  and a half down the column it was out of sight exactly when it mattered. Pinning it costs
-  ~124px of permanent chrome, which is why it is denser than the card was: the measured
-  total sits on the title row, the note is one line, and it lists four processes not five.
-  **It still shows core-seconds and never watts per process** - see the suggestions rules.
-  The bar is scaled against the busiest process, not the total, because a share-of-total bar
-  would read as a share of the watts. `bg` marks a process that owns no window.
+  describe the same measurement window and are meant to be read together. Pinning costs
+  ~124px of permanent chrome, which is why it is dense: the measured total sits on the title
+  row, the note is one line, and it lists four processes. **Core-seconds, never watts per
+  process** — see the suggestions rules. The bar scales against the busiest process, not the
+  total, because a share-of-total bar would read as a share of the watts. `bg` marks a
+  process that owns no window.
 - **The section bar only moves you.** It scrolls the column — nothing is hidden behind a
-  tab. That is partly principle and partly the test suite: it toggles *Basic settings* and
-  asserts `Visible` flips, and `Control.Visible` is false whenever an ancestor is hidden, so
-  putting sections on separate pages would break it. Keep every section on the one page.
-- **The current tab follows the scroll**, both ways, and clicking one scrolls there. Tests
-  cover all of it. `MarkNav` picks the last section whose top has passed the viewport top.
+  tab. Keep every section on the one page.
+- **The current tab follows the scroll**, both ways, and clicking one scrolls there.
+  `MarkNav` picks the last section whose top has passed the viewport top.
 - **The active thing is outlined in green** - the section tab, the battery/plugged-in
   switch, the profile buttons and the process-list sort toggles all share one marker, so
   "you are here" reads the same everywhere. `PillButton.Tab` renders a tab strip: `Dim`
-  until hovered or current, then `Raise` plus a green underline on the bar's baseline - the
+  until hovered or current, then `Raise` plus a green underline on the bar's baseline — the
   strip carries no outline, only the rule under the current tab; `Selected` on ordinary
-  buttons is `Raise` plus a green border. This was
-  once deliberately neutral, on the grounds that amber and green mean energy leaving and
-  energy kept and should not be spent on decoration - it was changed on request because
-  nothing else marked the current tab clearly enough. The cost is real, so **hover must not
-  also be green**: it uses `Hair`, or hover and active look identical.
+  buttons is `Raise` plus a green border. Green is spent here deliberately, so **hover must
+  not also be green**: it uses `Hair`, or hover and active look identical.
 - **Section headings are a rule, a gap, then a 16px title.** The gap above is much larger
   than the gap below — that is what attaches a heading to the cards under it. As a 13px
   inline label it read as one more line of text floating between two sections.

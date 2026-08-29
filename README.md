@@ -77,9 +77,9 @@ battery's own energy counter over a 60-second window. That means:
 - changing any setting resets the window and clears the trace, so what you see next
   reflects the new state instead of averaging across the change
 
-**Profiles.** Endurance / Balanced / Full speed. *Balanced* is the configuration that
-actually measured **6.92 W (6h21m)**. All of them write the **on-battery side only** —
-plugged-in behaviour is never touched, which is what kept this safe to experiment with.
+**Profiles.** Longest / Endurance / Balanced / Full speed. *Balanced* is the configuration
+that actually measured **6.92 W (6h21m)**. All of them write the **on-battery side only**;
+a profile never touches plugged-in behaviour.
 
 **Restore my settings.** Puts back the battery settings as they stood before PowerDial
 existed. The snapshot is taken on first run; since the app writes nothing until you touch
@@ -150,7 +150,12 @@ the culprits and says the cost is not yet measured, rather than borrowing a numb
 
 ## Design notes
 
-**Only the DC side is ever written.** No code path touches AC values.
+**The battery side is the default, and the only side anything writes by itself.** The
+advisor, the profiles and the restore point all call the DC path exclusively. The one
+exception is user-driven: the **Plugged in** switch in the settings section routes that
+section's edits to the AC side. It is opt-in, resets to battery every launch, and says on
+screen which side it is writing. Because the app can change AC, the restore point captures
+both sides.
 
 **Reads come from the registry, writes go through `powercfg`.** `powercfg /q` refuses to
 display hidden settings — it returns just a scheme header for the lid action, for example —
@@ -197,34 +202,9 @@ whatever is holding a discrete GPU awake costs upwards of 17 W while using almos
 Below both, a bar of section buttons scrolls the column; nothing is hidden behind a tab.
 
 Every interactive control is custom-drawn, because stock Win32 widgets cannot be made to
-look like this and, in the case of `TrackBar`, actively misbehave (see below).
-
-## Bugs found and fixed while building this
-
-Kept here because each one is a trap worth remembering.
-
-**The UI lied about the machine.** Applying on `MouseUp` meant wheel and keyboard changes
-never committed — the EPP slider drifted to 90 while the registry still held 80. Commits
-are now debounced 600 ms after *any* value change.
-
-**The mouse wheel silently rewrote system settings.** A focused Win32 `TrackBar` swallows
-wheel events and moves its own thumb, so scrolling the window changed a power setting.
-Every control here refuses the wheel.
-
-**The window scrolled itself away from its own header.** An `AutoScroll` panel calls
-`ScrollToControl` whenever focus moves. `SteadyPanel` overrides it to stay put.
-
-**It cost 3.75% of a CPU core** — absurd for something whose job is saving power — by
-constructing a `ManagementObjectSearcher` on every poll. Now **0.16%**.
-
-**`0.00 watts drawn` while charging.** The energy counter barely moves on AC, so the
-computed figure read as "using no power". It now says what it actually knows.
-
-**A crash with no message.** `BeginInvoke` in the constructor, before the window handle
-exists. There is now a global handler that writes `%LOCALAPPDATA%\PowerDial\crash.log`.
-
-**An `AutoSize` Card wrapping a docked `AutoSize` panel** made the form open full-screen
-and paint the GPU section twice.
+look like this and, in the case of `TrackBar`, actively misbehave: a focused one
+swallows the mouse wheel and moves its own thumb, so scrolling the window would rewrite a
+power setting. Every control here refuses the wheel.
 
 ## Files
 
@@ -236,7 +216,7 @@ and paint the GPU section twice.
 | `Battery.cs` | WMI battery sampling and the watts calculation |
 | `GpuWatch.cs` | discrete-GPU waker detection |
 | `Baseline.cs` | the restore point |
-| `Presets.cs` | the three profiles |
+| `Presets.cs` | the four profiles |
 | `Advisor.cs` | the suggestions: what is wrong right now, and what fixes it |
 | `Charts.cs` | the charts and the process table |
 | `ProcessWatch.cs` | live per-process CPU and memory sampling |

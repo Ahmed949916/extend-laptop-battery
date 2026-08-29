@@ -37,7 +37,9 @@ namespace PowerDial
         int _pendingValue;
 
         SteadyPanel _root;
-        Panel _chrome;              // header + section bar, pinned above the scroll area
+        Panel _chrome;              // header + watts strip + section bar, pinned above the scroll
+        Card _wattsStrip;           // "Where your watts go", pinned so it never scrolls away
+        Label _wattsTotal;          // the measured figure the list is describing
         Panel _navBar;
         readonly List<PillButton> _navBtns = new List<PillButton>();
         readonly List<Control> _navTargets = new List<Control>();
@@ -533,36 +535,6 @@ namespace PowerDial
             oc.Controls.Add(_offTable);
             _root.Controls.Add(oc);
 
-            Card wc2 = new Card { Width = W, Height = 186, Margin = new Padding(0, 0, 0, 10) };
-            wc2.Controls.Add(new Label {
-                Text = "Where your watts go", Location = new Point(14, 10), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
-            _contribNote = new Label {
-                Location = new Point(14, 32), Size = new Size(W - 30, 32),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
-            wc2.Controls.Add(_contribNote);
-            _contribList = new Panel {
-                Location = new Point(14, 66), Size = new Size(W - 30, 108), BackColor = Theme.Panel,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
-            _contribList.Paint += (s, e) => PaintContributors(e.Graphics);
-            wc2.Controls.Add(_contribList);
-            InfoDot cdot = new InfoDot {
-                Location = new Point(W - 34, 12), Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Heading = "Where your watts go",
-                Body = "The processes that burned the most CPU during the same window the watts figure " +
-                       "was timed over, so the two describe the same slice of time rather than the draw " +
-                       "from a minute ago and whatever happens to be busy this instant.\n\n" +
-                       "These are core-seconds, not watts, and that is deliberate. Splitting the measured " +
-                       "total across processes by CPU share would be a fabricated number, and it would " +
-                       "point at the wrong culprit: anything holding a discrete GPU awake costs upwards of " +
-                       "17 W while reporting almost no CPU at all. Use this to see what was working, then " +
-                       "A/B the draw itself to find out what a change is really worth.\n\n" +
-                       "The list empties when a setting changes, because the measurement window restarts."
-            };
-            wc2.Controls.Add(cdot);
-            _root.Controls.Add(wc2);
-
             Card hc = new Card { Width = W, Height = 104, Margin = new Padding(0, 0, 0, 10) };
             hc.Controls.Add(new Label {
                 Text = "Battery health", Location = new Point(14, 10), AutoSize = true,
@@ -684,6 +656,7 @@ namespace PowerDial
             });
 
             // built last: every section has to exist before the bar can point at them
+            BuildWattsStrip();
             BuildNav();
             // Scrolled covers the wheel as well as the scrollbar - the stock Scroll event
             // does not, so the strip used to go stale the moment anyone spun the wheel
@@ -696,10 +669,68 @@ namespace PowerDial
         /// or the GPU watch used to mean scrolling past everything else to get there.
         /// Nothing is hidden - this only moves you, so every section stays on one page.
         /// </summary>
+        /// <summary>
+        /// "Where your watts go", pinned between the header instrument and the section bar.
+        ///
+        /// It used to sit a screen and a half down the column, which put it out of sight
+        /// exactly when it was useful - the whole point is to read it against the draw
+        /// figure directly above it, and the two describe the same window. Pinned it costs
+        /// ~124px of permanent chrome, so it is deliberately denser than it was as a card:
+        /// the measured total moved up onto the title row, the explanation is one line
+        /// rather than two, and it lists four processes rather than five.
+        /// </summary>
+        void BuildWattsStrip()
+        {
+            _wattsStrip = new Card {
+                Location = new Point(Chrome, _readout.Bottom + 10), Width = W, Height = 124,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            _wattsStrip.Controls.Add(new Label {
+                Text = "Where your watts go", Location = new Point(14, 9), AutoSize = true,
+                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+
+            // The figure the list is describing. Measured, never derived - see the info text.
+            _wattsTotal = new Label {
+                Location = new Point(W - 250, 11), Size = new Size(212, 18),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right, TextAlign = ContentAlignment.MiddleRight,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            _wattsStrip.Controls.Add(_wattsTotal);
+
+            _contribNote = new Label {
+                Location = new Point(14, 30), Size = new Size(W - 60, 16),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            _wattsStrip.Controls.Add(_contribNote);
+
+            _contribList = new Panel {
+                Location = new Point(14, 50), Size = new Size(W - 30, 68), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+            _contribList.Paint += (s, e) => PaintContributors(e.Graphics);
+            _wattsStrip.Controls.Add(_contribList);
+
+            InfoDot cdot = new InfoDot {
+                Location = new Point(W - 32, 11), Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Heading = "Where your watts go",
+                Body = "The processes that burned the most CPU during the same window the watts figure " +
+                       "was timed over, so the two describe the same slice of time rather than the draw " +
+                       "from a minute ago and whatever happens to be busy this instant.\n\n" +
+                       "These are core-seconds, not watts, and that is deliberate. Splitting the measured " +
+                       "total across processes by CPU share would be a fabricated number, and it would " +
+                       "point at the wrong culprit: anything holding a discrete GPU awake costs upwards of " +
+                       "17 W while reporting almost no CPU at all. Use this to see what was working, then " +
+                       "A/B the draw itself to find out what a change is really worth.\n\n" +
+                       "bg marks a process with no window of its own - the ones that are easy to miss.\n\n" +
+                       "The list empties when a setting changes, because the measurement window restarts."
+            };
+            _wattsStrip.Controls.Add(cdot);
+            _chrome.Controls.Add(_wattsStrip);
+        }
+
         void BuildNav()
         {
             _navBar = new Panel {
-                Location = new Point(Chrome, _readout.Bottom + 10), Width = W, Height = 36,
+                Location = new Point(Chrome, _wattsStrip.Bottom + 10), Width = W, Height = 36,
                 BackColor = Theme.Ink,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -857,8 +888,10 @@ namespace PowerDial
             int extra = Math.Max(0, avail - w);
             _root.Padding = new Padding(Chrome + extra / 2, 12, 6, 20);
             _readout.Width = w;
+            _wattsStrip.Width = w;
             _navBar.Width = w;
             _readout.Left = Chrome + extra / 2;
+            _wattsStrip.Left = _readout.Left;
             _navBar.Left = _readout.Left;
 
             foreach (Control c in _root.Controls)
@@ -1527,29 +1560,59 @@ namespace PowerDial
             Theme.Quality(g);
             g.Clear(Theme.Panel);
 
-            List<KeyValuePair<string, double>> top = WindowTop(5);
+            List<KeyValuePair<string, double>> top = WindowTop(4);
             if (top.Count == 0)
             {
                 Theme.Str(g, _bat.OnAc
                     ? "nothing timed yet - readings only happen on battery"
                     : "collecting - the first window takes " + _bat.WindowSeconds + " seconds",
-                    Theme.Small, Theme.Dim, 0, 4);
+                    Theme.Small, Theme.Dim, 0, 2);
                 return;
             }
 
+            // Bars are scaled against the busiest process, not against the total: this ranks
+            // what was working, and a share-of-total bar would read as a share of the watts.
             double max = top[0].Value;
             if (max <= 0) max = 1;
+
+            const int NameW = 150;                 // name column, then the bar, then the figure
+            const int FigW = 58;
+            int barMax = Math.Max(20, _contribList.Width - NameW - FigW - 12);
+
             int y = 0;
             foreach (KeyValuePair<string, double> kv in top)
             {
-                int barW = (int)Math.Round(kv.Value / max * (_contribList.Width - 210));
-                if (barW < 2) barW = 2;
-                Theme.FillRound(g, new Rectangle(150, y + 5, barW, 10), 3, Theme.Spend);
                 Theme.Str(g, kv.Key, Theme.Body, Theme.Text, 0, y);
-                Theme.StrRight(g, kv.Value.ToString("0.0") + " cpu-s", Theme.Small, Theme.Dim,
-                               _contribList.Width, y + 2);
-                y += 21;
+
+                // A process with no window of its own is the easy one to miss, so it is
+                // marked - quietly, because it is a label and not a verdict.
+                if (IsBackground(kv.Key))
+                {
+                    float nx = g.MeasureString(kv.Key, Theme.Body).Width;
+                    if (nx < NameW - 26)
+                        Theme.Str(g, "bg", Theme.Small, Theme.Dim, nx + 4, y + 2);
+                }
+
+                // An empty track behind the bar, so a short bar still reads as a short bar
+                // rather than as a rendering that has not finished.
+                Theme.FillRound(g, new Rectangle(NameW, y + 4, barMax, 9), 3, Theme.Inset);
+                int barW = (int)Math.Round(kv.Value / max * barMax);
+                if (barW < 2) barW = 2;
+                Theme.FillRound(g, new Rectangle(NameW, y + 4, barW, 9), 3, Theme.Spend);
+
+                Theme.StrRight(g, kv.Value.ToString("0.0") + "s", Theme.Small, Theme.Dim,
+                               _contribList.Width, y + 1);
+                y += 17;
             }
+        }
+
+        /// <summary>Did any instance of this executable own a window at the last sample?</summary>
+        bool IsBackground(string name)
+        {
+            if (_procs == null) return false;
+            foreach (ProcInfo pi in _procs)
+                if (pi != null && pi.Name == name) return pi.Background;
+            return false;
         }
 
         void RefreshContributors()
@@ -1558,11 +1621,16 @@ namespace PowerDial
             int secs = 0;
             if (_window.Count > 0)
                 secs = (int)Math.Round((DateTime.UtcNow - _window[0].At).TotalSeconds);
-            _contribNote.Text = _window.Count == 0
-                ? "Ranked by CPU over the same window the watts figure was timed across. Not watts - " +
-                  "an idle-but-awake GPU costs far more than anything here while using no CPU."
-                : "Over the last " + secs + "s, the window the watts figure was timed across. " +
-                  "Core-seconds, not watts - what was working, not what it cost.";
+            _contribNote.Text = "Busiest processes over the same window - core-seconds, not watts.";
+
+            // The measured figure the list is describing. Only ever the reading itself: the
+            // section refuses to split it across processes, so it must not look split.
+            if (_wattsTotal != null)
+            {
+                if (_bat.OnAc) _wattsTotal.Text = "on power - nothing to measure";
+                else if (!_bat.Watts.HasValue) _wattsTotal.Text = "measuring the first window";
+                else _wattsTotal.Text = _bat.Watts.Value.ToString("0.0") + " W measured over " + secs + "s";
+            }
             _contribList.Invalidate();
         }
 

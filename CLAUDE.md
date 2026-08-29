@@ -270,12 +270,21 @@ Two things follow, and both are baked into the code:
 
 ## The window
 
-One scrolling column, about three screens long, with two things pinned above it in
-`_chrome`: the header instrument and a bar of section buttons.
+One scrolling column, about three screens long, with three things pinned above it in
+`_chrome`, in this order: the header instrument, the *Where your watts go* strip, and the
+bar of section buttons.
 
 - **The header does not scroll.** Draw, what is left, charge, health and the measured
   average are why the app is open; they used to leave the screen within one flick of the
   wheel, so you could not see the effect of the control you had just moved.
+- **Nor does *Where your watts go*.** It sits directly under the header because the two
+  describe the same measurement window and are meant to be read together; as a card a screen
+  and a half down the column it was out of sight exactly when it mattered. Pinning it costs
+  ~124px of permanent chrome, which is why it is denser than the card was: the measured
+  total sits on the title row, the note is one line, and it lists four processes not five.
+  **It still shows core-seconds and never watts per process** - see the suggestions rules.
+  The bar is scaled against the busiest process, not the total, because a share-of-total bar
+  would read as a share of the watts. `bg` marks a process that owns no window.
 - **The section bar only moves you.** It scrolls the column — nothing is hidden behind a
   tab. That is partly principle and partly the test suite: it toggles *Basic settings* and
   asserts `Visible` flips, and `Control.Visible` is false whenever an ancestor is hidden, so

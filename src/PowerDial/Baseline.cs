@@ -28,16 +28,6 @@ namespace PowerDial
         public string Source { get; set; }
         public List<BaselineEntry> Entries { get; set; }
 
-        /// <summary>
-        /// Screen brightness as it stood on first run, 0-100. Null when the display does
-        /// not expose it, or when the snapshot predates this field - in which case restore
-        /// leaves brightness alone and says so, rather than inventing a level to go back to.
-        ///
-        /// It belongs here because the app changes it: every profile sets a brightness, and
-        /// so does the suggestion that turns the screen down. Without it, the one change you
-        /// can actually see was the one Restore could not undo.
-        /// </summary>
-        public int? Brightness { get; set; }
 
         /// <summary>When the plugged-in side was added, if it was filled in after the
         /// original capture rather than taken with it. Null means it was there all along.</summary>
@@ -86,8 +76,7 @@ namespace PowerDial
                     CapturedUtc = DateTime.UtcNow.ToString("u"),
                     Scheme = PowerCfg.ActiveScheme(),
                     Source = "captured on first run, before this app wrote anything",
-                    Entries = new List<BaselineEntry>(),
-                    Brightness = Brightness.Get()
+                    Entries = new List<BaselineEntry>()
                 };
                 foreach (Knob k in PowerCfg.Knobs)
                 {
@@ -101,8 +90,8 @@ namespace PowerDial
                     });
                 }
                 Save(bf);
-                return "Saved your current settings as the restore point (" + bf.Entries.Count +
-                       " values" + (bf.Brightness.HasValue ? " plus brightness at " + bf.Brightness.Value + "%" : "") + ").";
+                return "Saved your current settings as the restore point (" +
+                       bf.Entries.Count + " values).";
             }
             catch (Exception ex)
             {
@@ -118,9 +107,6 @@ namespace PowerDial
         /// most once, before the user can reach that switch, so it can never capture a
         /// value the app itself put there.
         ///
-        /// Brightness is deliberately NOT backfilled the same way. The profiles set it, so
-        /// the current level is very likely something this app chose, and recording that as
-        /// the original would be a lie.
         /// </summary>
         public static string BackfillAcIfMissing()
         {
@@ -155,11 +141,14 @@ namespace PowerDial
             }
         }
 
+        // one instance, reused across saves
+        static readonly JsonSerializerOptions Pretty =
+            new JsonSerializerOptions { WriteIndented = true };
+
         public static void Save(BaselineFile bf)
         {
             Directory.CreateDirectory(Folder);
-            JsonSerializerOptions o = new JsonSerializerOptions { WriteIndented = true };
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(bf, o));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(bf, Pretty));
         }
 
         public static BaselineFile Load()
@@ -227,25 +216,6 @@ namespace PowerDial
                 }
             }
 
-            // Brightness last, because it is the one the user can see move, and because a
-            // snapshot taken before this field existed has nothing to go back to.
-            if (bf.Brightness.HasValue)
-            {
-                int want = bf.Brightness.Value;
-                string berr = Brightness.Set(want);
-                if (berr != null) { log.Add("  failed  screen brightness - " + berr); failed++; }
-                else
-                {
-                    int? back = Brightness.Get();
-                    // panels often expose only a few levels and snap to the nearest
-                    if (back.HasValue && Math.Abs(back.Value - want) <= 5)
-                    { log.Add("  restored screen brightness to " + back.Value + "%"); ok++; }
-                    else
-                    { log.Add("  unverified screen brightness - asked for " + want + "%, reads " +
-                              (back.HasValue ? back.Value + "%" : "unavailable")); failed++; }
-                }
-            }
-            else log.Add("  skipped screen brightness - none was recorded on this PC");
 
             log.Add(ok + " restored on battery, " + acOk + " plugged in, " + failed + " failed.");
             if (acSkipped > 0)

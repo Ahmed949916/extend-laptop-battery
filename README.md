@@ -6,7 +6,7 @@ way back to how things were.
 
 It runs on **any Windows 10 or 11 PC** - gaming laptop, ultrabook or desktop - and adapts
 to what it finds. Nothing about the hardware is assumed: the battery, the GPUs, which
-settings exist and whether the display brightness can be controlled are all detected, and
+settings exist are all detected, and
 anything that has to be measured stays blank until it has been measured **here**. You will
 never see a watt figure borrowed from someone else's machine.
 
@@ -27,7 +27,6 @@ presets, **Restore original settings**, or **Quit**. Only one instance runs at a
       README.md                 this file
       src\PowerDial\            source
       src\PowerDial-selftest\   read-only checks against the live machine
-      src\PowerDial-uitest\     drives the real window, 42 checks
 
     Desktop\PowerDial.lnk       shortcut to the exe
 
@@ -86,7 +85,7 @@ restarts rather than starting from nothing each launch:
 - *Since recording began* - the cumulative tally. Which process has actually burned the
   most CPU across every session, which is the one costing you runtime. This is the view
   that named `OneDrive.Sync.Service` as the top consumer here.
-- *Where your watts go* - the live draw split into backlight and everything else.
+- *Where your watts go* - which processes were busiest while the reading was timed.
 - *Battery health* - 43.9 Wh still held against the 70.6 Wh it shipped with, and what the
   missing capacity costs you in hours at the present draw.
 
@@ -137,7 +136,7 @@ are ones Windows hides from its own Power Options UI.
 **Writes are verified, not assumed.** After every write the value is read back; if it
 disagrees, the activity log says so and shows what it actually reads.
 
-**Elevation is `asInvoker`, deliberately.** Most of what this writes (EPP, brightness)
+**Elevation is `asInvoker`, deliberately.** Most of what this writes (EPP and the rest)
 succeeds unelevated, so demanding a UAC prompt at every launch would be gratuitous. Anything that does need admin reports it and offers **Run as admin**.
 
 **Nothing is written just by running it.** Verified: launching the app leaves every
@@ -201,7 +200,6 @@ and paint the GPU section twice.
 | `Config.cs` | per-machine measured values, persisted |
 | `PowerCfg.cs` | the settings, registry reads, `powercfg` writes, info text |
 | `Battery.cs` | WMI battery sampling and the watts calculation |
-| `Brightness.cs` | WMI backlight get/set |
 | `GpuWatch.cs` | discrete-GPU waker detection |
 | `Baseline.cs` | the restore point |
 | `Presets.cs` | the three profiles |
@@ -216,21 +214,19 @@ and paint the GPU section twice.
 
 ## Tests
 
-Both are read-only and safe to run any time.
+The selftest is read-only and safe to run any time.
 
     cd src\PowerDial-selftest && dotnet run -c Release   # live machine: every setting readable, values match
-    cd src\PowerDial-uitest   && dotnet run -c Release   # drives the real window: 42 checks
 
-The UI test builds the actual `MainForm` off-screen and drives the controls directly
-rather than firing synthetic mouse events, which kept missing and once snapped the window
-to half the screen. Set `PD_SHOTS` to a directory to have it render the collapsed and
-expanded states to PNGs.
+It snapshots every battery-side value, runs the advisor scan, and compares - so it proves
+reading the machine does not change it. There is no longer a UI test; a version that built
+`MainForm` off-screen and asserted its structure was removed because keeping it current
+cost more than it caught. Build and open the app after touching the window.
 
 ## Known limits
 
-- Some figures have to be measured on your hardware before they can be shown: the backlight
-  cost per brightness point, and what an awake discrete GPU costs. Until then those panels
-  say so instead of guessing.
+- One figure has to be measured on your hardware before it can be shown: what an awake
+  discrete GPU costs. Until then that panel says so instead of guessing.
 - Discrete-versus-integrated GPU detection is a heuristic based on the adapter name. It is
   right on every common part but could mislabel something unusual.
 - The watts figure needs a full window, and reads high at low charge, where a degraded

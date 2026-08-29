@@ -108,20 +108,6 @@ class SelfTest
         Check("profile comparison ran", true, matched ?? "custom");
         Console.WriteLine();
 
-        Console.WriteLine("--- brightness ---");
-        int? b = Brightness.Get();
-        Console.WriteLine("  current : " + (b.HasValue ? b.Value + "%" : "unavailable"));
-        Check("brightness readable when the display supports it",
-              b.HasValue || !Machine.BrightnessControllable,
-              Machine.BrightnessControllable ? "controllable" : "not controllable on this display");
-        // Model lives in Charts.cs, which this project does not pull in (it would drag
-        // in WinForms); the value itself comes from Config either way.
-        double? perPoint = Config.BacklightWattsPerPoint;
-        double? bw = (b.HasValue && perPoint.HasValue)
-            ? (double?)(b.Value * perPoint.Value) : null;
-        Console.WriteLine("  backlight cost: " + (bw.HasValue
-            ? "~" + bw.Value.ToString("0.00") + " W" : "not measured on this display yet"));
-        Console.WriteLine();
 
         Console.WriteLine("--- gpu watchdog ---");
         List<Finding> f = GpuWatch.Check();
@@ -195,8 +181,8 @@ class SelfTest
         Check("every suggestion explains itself", thinText == 0, "title, detail and 80+ chars of info");
         Check("every suggestion has something to press", noAction == 0);
         Check("no saving is quoted unless measured here", inventedGain == 0,
-              Config.Current.DiscreteGpuWakeWatts.HasValue || Config.BacklightWattsPerPoint.HasValue
-                  ? "some figures are calibrated" : "nothing calibrated yet, so no figures shown");
+              Config.Current.DiscreteGpuWakeWatts.HasValue
+                  ? "the GPU wake cost is calibrated" : "nothing calibrated yet, so no figures shown");
 
         // an empty list is a real answer, not a broken scanner
         if (sug.Count == 0)
@@ -217,9 +203,7 @@ class SelfTest
                     Console.WriteLine("  OUT OF RANGE in " + p.Name + ": " + kv.Key + "=" + kv.Value +
                                       " (allowed " + k.Min + ".." + k.Max + ")");
             }
-            Console.WriteLine(string.Format("  {0,-12} {1} settings, brightness {2}",
-                p.Name, p.Values.Count,
-                p.Brightness.HasValue ? p.Brightness.Value + "%" : "unchanged"));
+            Console.WriteLine(string.Format("  {0,-12} {1} settings", p.Name, p.Values.Count));
             Check(p.Name + " references only known knobs", unknown == 0);
         }
         Console.WriteLine();

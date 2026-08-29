@@ -16,25 +16,31 @@ the code.
 
     cd src\PowerDial
     dotnet build -c Release
-    dotnet publish -c Release -o ..\..                  publish over the runnable copy
+    dotnet publish -c Release -o %TEMP%\pd-publish      then copy over the runnable copy
+    copy /y %TEMP%\pd-publish\* ..\..
 
     cd src\PowerDial-selftest && dotnet run -c Release   read-only, checks the live machine
-    cd src\PowerDial-uitest   && dotnet run -c Release   builds the real form, 66 checks
 
-.NET 6 SDK (6.0.428), `net6.0-windows`, `UseWindowsForms`. NuGet works; only dependency is
+.NET 10 SDK (10.0.400), `net10.0-windows`, `UseWindowsForms`. NuGet works; only dependency is
 `System.Management`. `msbuild` is not on PATH — use `dotnet build`.
 
-Set `PD_SHOTS` to a directory and the UI test renders the collapsed and expanded window to
-PNGs. Note `DrawToBitmap` does not render plain `Label` children, so slider value captions
-are missing from those images — that is the capture, not the app.
+**Run the selftest after any change.** It is read-only and takes about half a minute.
 
-**Run both suites after any change.** They are read-only and take about a minute.
+**Quit the running copy first** if anything writes `offenders.json`. Two processes each
+save from their own in-memory tally, so whichever writes last wins and the file can come
+out smaller than it went in.
 
-**Quit the running copy first.** The tray app and the UI test both append to
-`offenders.json`, each from its own in-memory tally, so whichever saves last wins and the
-file can come out smaller than it went in. That trips the *history file grew* check at
-random. It is a race between two processes, not a regression — if that check is the only
-failure, close PowerDial and run it again.
+**There is no UI test any more.** It drove the real form and asserted its structure, and it
+was removed to cut maintenance: every feature change meant updating it. Nothing now checks
+the window builds, so build and open the app after touching `MainForm` or `Widgets`.
+
+**Never publish straight into the repo root.** `dotnet publish -o ..\..` used to work and now
+fails with `CS5001: Program does not contain a static 'Main'`, which is a genuinely
+confusing way to say what went wrong. The SDK's default compile glob excludes everything
+under `$(PublishDir)`; point that at the repo root and the exclusion swallows the whole
+repository, `Program.cs` included, so the compiler is handed zero source files. `dotnet
+build` is unaffected because it never sets `PublishDir`. Publish to a directory outside the
+project and copy the payload in — that is what the two commands above do.
 
 ## Hard invariants — do not break these
 
@@ -56,7 +62,7 @@ failure, close PowerDial and run it again.
    Never report success you have not confirmed.
 4. **Nothing is written just by launching the app.** The restore point is captured on first
    run and depends on this. There is a test for it.
-5. **Elevation is `asInvoker` on purpose.** EPP and brightness succeed unelevated here.
+5. **Elevation is `asInvoker` on purpose.** EPP succeeds unelevated here.
    Anything needing admin reports it and offers *Run as admin*.
 
 ## Nothing about the hardware is hardcoded
@@ -69,10 +75,8 @@ happened the interface says "not measured on this PC" rather than showing a borr
 |---|---|
 | Battery present, form factor, vendor, model | `Machine.Detect` via WMI + chassis type |
 | GPUs, vendor, discrete vs integrated, hybrid | `Win32_VideoController` + PNP vendor id |
-| Brightness controllable | presence of `WmiMonitorBrightnessMethods` |
 | Which power settings exist | `PowerCfg.Exists` — the registry settings store |
 | **Original design capacity** | see below |
-| Backlight watts per point | `Config` — measured, null until then |
 | Discrete GPU wake cost | `Config` — measured, null until then |
 
 **Design capacity** is the interesting one. Several vendors rewrite the live
@@ -111,8 +115,7 @@ Four rules, and all four exist because breaking them makes the section worthless
    it relaunches via `sihost.exe`.
 
 `Apply` writes with `PowerCfg.WriteDc`, reads straight back and compares before claiming
-anything. Brightness is compared with a tolerance, because plenty of panels expose only a
-handful of levels and snap to the nearest.
+anything.
 
 The scan runs on startup, once more on the first poll, and after any change - not on the
 poll timer. The extra pass exists because CPU is a delta: the startup sample has memory
@@ -262,17 +265,31 @@ One scrolling column, about three screens long, with two things pinned above it 
   putting sections on separate pages would break it. Keep every section on the one page.
 - **The current tab follows the scroll**, both ways, and clicking one scrolls there. Tests
   cover all of it. `MarkNav` picks the last section whose top has passed the viewport top.
-- **The active tab is neutral, not green.** `PillButton.Tab` renders a tab strip: `Dim`
-  until hovered or current, then `Raise` plus an underline on the bar's baseline. Amber and
-  green mean energy leaving and energy kept; spending green on "you are here" would dilute
-  the only two colours in here that carry data. `Selected` on ordinary buttons went neutral
-  for the same reason.
+- **The active thing is outlined in green** - the section tab, the battery/plugged-in
+  switch, the profile buttons and the process-list sort toggles all share one marker, so
+  "you are here" reads the same everywhere. `PillButton.Tab` renders a tab strip: `Dim`
+  until hovered or current, then `Raise` plus a green underline on the bar's baseline - the
+  strip carries no outline, only the rule under the current tab; `Selected` on ordinary
+  buttons is `Raise` plus a green border. This was
+  once deliberately neutral, on the grounds that amber and green mean energy leaving and
+  energy kept and should not be spent on decoration - it was changed on request because
+  nothing else marked the current tab clearly enough. The cost is real, so **hover must not
+  also be green**: it uses `Hair`, or hover and active look identical.
 - **Section headings are a rule, a gap, then a 16px title.** The gap above is much larger
   than the gap below — that is what attaches a heading to the cards under it. As a 13px
   inline label it read as one more line of text floating between two sections.
 - **`Relayout` stretches the design width to the window** and caps the column at `WMax`; a
   chart three thousand pixels wide is wider, not clearer. Everything is still built once at
   `W`, so all the geometry arithmetic stays in one place.
+
+- **Work shows on the button that started it, not on a bar elsewhere.** `PillButton.Busy`
+  spins an arc where the label goes; `BeginBusy`/`BusyStep`/`EndBusy` drive it and
+  `RunBusy(btn, work)` wraps any single blocking call. Where the work is a countable list of
+  writes the count rides beside the arc, so applying a profile still says how far along it
+  is. The column is disabled throughout - queued clicks onto a half-written scheme are how
+  you get settings nobody asked for. **`EndBusy` must null-check and `IsDisposed`-check the
+  button**: `RefreshFixes` rebuilds the suggestion cards, so the button that started the
+  work is often gone by the time it finishes.
 
 ## Editing notes
 

@@ -6,7 +6,6 @@ namespace PowerDial
     {
         public string Name;
         public string Blurb;
-        public int? Brightness;                        // null = leave alone
         public Dictionary<string, int> Values;         // knob key -> battery-side value
     }
 
@@ -35,7 +34,6 @@ namespace PowerDial
             new Preset {
                 Name = "Longest",
                 Blurb = "Everything traded for runtime. Boost off, dimmest screen, sleeps quickly.",
-                Brightness = 20,
                 Values = new Dictionary<string, int> {
                     { "epp", 100 },        // all efficiency, no chasing clocks at all
                     { "cpumax", 99 },      // 99 rather than lower: see the note below
@@ -52,7 +50,6 @@ namespace PowerDial
             new Preset {
                 Name = "Endurance",
                 Blurb = "Every last minute. Boost locked out, dim screen, quick sleep.",
-                Brightness = 25,
                 Values = new Dictionary<string, int> {
                     { "epp", 90 },
                     { "cpumax", 99 },
@@ -68,7 +65,6 @@ namespace PowerDial
             new Preset {
                 Name = "Balanced",
                 Blurb = "The sensible default. Efficient without feeling slow.",
-                Brightness = 30,
                 Values = new Dictionary<string, int> {
                     { "epp", 80 },
                     { "cpumax", 100 },
@@ -84,7 +80,6 @@ namespace PowerDial
             new Preset {
                 Name = "Full speed",
                 Blurb = "Unrestricted CPU while on battery. Expect much shorter runtime.",
-                Brightness = 60,
                 Values = new Dictionary<string, int> {
                     { "epp", 50 },
                     { "cpumax", 100 },

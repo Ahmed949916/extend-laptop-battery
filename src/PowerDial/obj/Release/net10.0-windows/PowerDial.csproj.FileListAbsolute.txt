@@ -1,0 +1,17 @@
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.csproj.AssemblyReference.cache
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.AssemblyInfoInputs.cache
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.AssemblyInfo.cs
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.csproj.CoreCompileInputs.cache
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.sourcelink.json
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\PowerDial.exe
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\PowerDial.deps.json
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\PowerDial.runtimeconfig.json
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\PowerDial.dll
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\System.Management.dll
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\runtimes\win\lib\net10.0\System.Management.dll
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.csproj.Up2Date
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.dll
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\refint\PowerDial.dll
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\PowerDial.genruntimeconfig.cache
+C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\ref\PowerDial.dll

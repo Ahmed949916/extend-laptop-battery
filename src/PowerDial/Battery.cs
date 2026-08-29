@@ -19,7 +19,7 @@ namespace PowerDial
     /// the same way it was measured by hand: time the battery energy counter over a
     /// window and divide. That means the first reading needs WindowSeconds to appear.
     /// </summary>
-    public class BatteryMonitor
+    public class BatteryMonitor : IDisposable
     {
         /// <summary>
         /// Original design capacity in mWh, detected per machine. 0 when it cannot be
@@ -66,7 +66,7 @@ namespace PowerDial
         }
 
         /// <summary>False on a desktop, so the interface can drop the battery panels.</summary>
-        public bool Present { get { return Machine.HasBattery; } }
+        public static bool Present { get { return Machine.HasBattery; } }
 
         /// <summary>Hours left at the present rate, or null if not draining.</summary>
         public double? HoursRemaining
@@ -86,6 +86,18 @@ namespace PowerDial
                 if (!Watts.HasValue || Watts.Value <= 0.1 || !FullChargeMwh.HasValue) return null;
                 return (FullChargeMwh.Value / 1000.0) / Watts.Value;
             }
+        }
+
+        /// <summary>
+        /// Release the two WMI searchers. They are built once and reused - constructing
+        /// them per poll is what once cost this app 3.75% of a core - so they live as long
+        /// as the app does and are let go here rather than left to the finaliser.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_statusQ != null) { _statusQ.Dispose(); _statusQ = null; }
+            if (_capacityQ != null) { _capacityQ.Dispose(); _capacityQ = null; }
+            GC.SuppressFinalize(this);
         }
 
         public void Poll()

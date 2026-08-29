@@ -14,7 +14,6 @@ namespace PowerDial
         public double W { get; set; }        // watts drawn; 0 when unknown or on AC
         public int Pct { get; set; }         // charge, percent of full
         public bool Ac { get; set; }
-        public int Br { get; set; }          // brightness
         public double Cpu { get; set; }      // total CPU across all processes, share of one core
         public double BgMb { get; set; }     // background working set, MB
         public string Top { get; set; }      // "chrome 12.4|claude 8.1|dwm 2.0"

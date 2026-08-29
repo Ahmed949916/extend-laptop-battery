@@ -36,7 +36,6 @@ namespace PowerDial
         public static string CpuName { get; private set; }
         public static int CpuCores { get; private set; }
         public static List<GpuInfo> Gpus { get; private set; }
-        public static bool BrightnessControllable { get; private set; }
 
         /// <summary>Best available original design capacity, mWh. 0 when unknown.</summary>
         public static int DesignCapacityMwh { get; private set; }
@@ -138,17 +137,6 @@ namespace PowerDial
 
             DetectGpus();
             DetectBattery();
-
-            try
-            {
-                using (ManagementObjectSearcher q = new ManagementObjectSearcher(
-                           "root\\wmi", "SELECT * FROM WmiMonitorBrightnessMethods"))
-                {
-                    BrightnessControllable = false;
-                    foreach (ManagementObject mo in q.Get()) { BrightnessControllable = true; break; }
-                }
-            }
-            catch { BrightnessControllable = false; }
         }
 
         static void DetectGpus()
@@ -163,8 +151,8 @@ namespace PowerDial
                         string pnp = Str(mo["PNPDeviceID"]).ToUpperInvariant();
                         if (name.Length == 0) continue;
                         // ignore Windows' software fallback adapter
-                        if (name.IndexOf("Basic Render", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                        if (name.IndexOf("Basic Display", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                        if (name.Contains("Basic Render", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (name.Contains("Basic Display", StringComparison.OrdinalIgnoreCase)) continue;
 
                         GpuVendor v = GpuVendor.Unknown;
                         if (pnp.Contains("VEN_10DE")) v = GpuVendor.Nvidia;
@@ -207,7 +195,7 @@ namespace PowerDial
                 return n.Contains("GEFORCE") || n.Contains("RTX") || n.Contains("GTX") ||
                        n.Contains("QUADRO") || n.Contains("NVIDIA");
             if (v == GpuVendor.Amd)
-                return n.Contains(" RX ") || n.StartsWith("RX") || n.Contains("RADEON PRO") ||
+                return n.Contains(" RX ") || n.StartsWith("RX", StringComparison.Ordinal) || n.Contains("RADEON PRO") ||
                        n.Contains("FIREPRO") || n.Contains("W6") || n.Contains("W7");
             if (v == GpuVendor.Intel)
                 return n.Contains("ARC");

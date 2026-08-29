@@ -16,7 +16,7 @@ namespace PowerDial
         const int Chrome = 14;      // gutter either side of the column
         const int SideCol = 340;    // x of the plugged-in column in a settings row
 
-        class Row
+        sealed class Row
         {
             public Knob Knob;
             public Card Host;
@@ -35,7 +35,6 @@ namespace PowerDial
 
         Row _pendingRow;
         int _pendingValue;
-        int? _pendingBrightness;
 
         SteadyPanel _root;
         Panel _chrome;              // header + section bar, pinned above the scroll area
@@ -45,8 +44,6 @@ namespace PowerDial
         readonly Dictionary<string, Control> _sections = new Dictionary<string, Control>();
         Readout _readout;
         Sparkline _spark;
-        Slider _brightSlider;
-        Label _brightValue, _brightCost;
         Panel _basicBox;
         SectionToggle _basicToggle, _logToggle;
         Panel _logBox;
@@ -59,20 +56,20 @@ namespace PowerDial
         Card _fixCard;
         Label _fixSummary;
         PillButton _fixApplyAll;
+        PillButton _btnRestore;
         List<Suggestion> _fixes = new List<Suggestion>();
         List<Finding> _findings;
         bool _fixesSeeded;
         LineChart _chartWatts;
         BatteryChart _batChart;
         ProcessTable _procTable, _offTable;
-        StackBar _barWatts, _barHealth;
+        StackBar _barHealth;
         Label _healthNote, _histLabel, _procLabel, _procTotals, _contribNote;
         PillButton _btnMem, _btnCpu, _btnBg;
         Panel _contribList;
         PillButton _fixRecheck;
 
-        Panel _busyBar;
-        string _busyText = "";
+        PillButton _busyBtn;            // the button that was clicked, spinning until done
         int _busyTotal, _busyDone;
 
         // which side the settings section writes. Battery unless explicitly switched.
@@ -91,7 +88,7 @@ namespace PowerDial
         /// background app holding the discrete GPU awake costs ~17 W at near-zero CPU, so
         /// splitting the measured total by CPU share would point at the wrong process.
         /// </summary>
-        class PollCpu { public DateTime At; public Dictionary<string, double> Core; }
+        sealed class PollCpu { public DateTime At; public Dictionary<string, double> Core; }
         readonly List<PollCpu> _window = new List<PollCpu>();
         DateTime _lastPoll = DateTime.MinValue;
         DateTime _windowStart = DateTime.MinValue;   // when the current draw window began
@@ -169,11 +166,6 @@ namespace PowerDial
                 {
                     Row r = _pendingRow; _pendingRow = null;
                     ApplyKnob(r, _pendingValue);
-                }
-                if (_pendingBrightness.HasValue)
-                {
-                    int v = _pendingBrightness.Value; _pendingBrightness = null;
-                    CommitBrightness(v);
                 }
             };
 
@@ -329,7 +321,8 @@ namespace PowerDial
                 Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(168, 3),
                 Size = new Size(126, 32), BackColor = Theme.Panel
             };
-            _fixRecheck.Click += (s, e) => { LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); };
+            _fixRecheck.Click += (s, e) => RunBusy(_fixRecheck, delegate {
+                LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); });
             _fixButtons.Controls.Add(_fixRecheck);
             _fixCard.Controls.Add(_fixButtons);
 
@@ -362,12 +355,12 @@ namespace PowerDial
             _root.Controls.Add(profiles);
 
             Panel restoreRow = new Panel { Width = W, Height = 38, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 2) };
-            PillButton restore = new PillButton {
+            _btnRestore = new PillButton {
                 Text = "Restore original settings", Glyph = Theme.GlyphUndo,
                 Location = new Point(0, 0), Size = new Size(232, 36), Primary = true
             };
-            restore.Click += (s, e) => RestoreBaseline();
-            restoreRow.Controls.Add(restore);
+            _btnRestore.Click += (s, e) => RestoreBaseline();
+            restoreRow.Controls.Add(_btnRestore);
             _root.Controls.Add(restoreRow);
 
             Label profileNote = new Label {
@@ -385,53 +378,6 @@ namespace PowerDial
             _root.Controls.Add(_adminBtn);
             if (!PowerCfg.IsElevated()) _adminBtn.Visible = true;
 
-            // ---------------------------------------------------------- brightness
-            _root.Controls.Add(Heading("Screen brightness", "the biggest lever you hold directly",
-                "Often the single biggest thing you control directly, and the one most people leave " +
-                "alone.\n\n" +
-                "How much a backlight costs varies enormously - a small dim panel and a large bright " +
-                "one differ by several times - so this app will not quote you a number it has not " +
-                "measured on this display. Once it has, the watt figure appears beside the slider " +
-                "and in Where your watts go.\n\n" +
-                "It bites hardest when the machine is otherwise quiet, because then it is a large " +
-                "slice of a small total."));
-
-            Card bc = new Card { Width = W, Height = 56, Margin = new Padding(0, 0, 0, 12) };
-            _brightSlider = new Slider {
-                Location = new Point(14, 14), Size = new Size(W - 210, 28),
-                Minimum = 0, Maximum = 100, Step = 5, Accent = Theme.Spend,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            _brightSlider.ValueChanged += (s, e) => {
-                UpdateBrightLabels();
-                if (_loading) return;
-                _pendingBrightness = _brightSlider.Value;
-                _commit.Stop(); _commit.Start();
-            };
-            bc.Controls.Add(_brightSlider);
-            _brightValue = new Label {
-                Text = "--", Location = new Point(W - 186, 16), Size = new Size(56, 24),
-                Font = Theme.Value, ForeColor = Theme.Text, BackColor = Theme.Panel,
-                TextAlign = ContentAlignment.MiddleRight, Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            bc.Controls.Add(_brightValue);
-            _brightCost = new Label {
-                Text = "", Location = new Point(W - 124, 20), Size = new Size(74, 18),
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            bc.Controls.Add(_brightCost);
-            InfoDot bdot = new InfoDot {
-                Location = new Point(W - 34, 19), Heading = "Screen brightness", Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Body = "Backlight cost varies by several times between displays, so no figure is shown " +
-                       "here until it has been measured on this one.\n\n" +
-                       "It matters most when the machine is otherwise idle, because then it is a large " +
-                       "share of a small total. On a quiet laptop, going from 30% to 80% can cost more " +
-                       "runtime than every CPU setting on this page put together.\n\n" +
-                       "Around 30% indoors is usually the sweet spot. Below 20% you are chasing minutes " +
-                       "at real cost to your eyes."
-            };
-            bc.Controls.Add(bdot);
-            _root.Controls.Add(bc);
 
             // ---------------------------------------------------------- impact knobs
             _root.Controls.Add(Heading("What changes your watts", "the settings worth tuning",
@@ -584,31 +530,23 @@ namespace PowerDial
             oc.Controls.Add(_offTable);
             _root.Controls.Add(oc);
 
-            Card wc2 = new Card { Width = W, Height = 268, Margin = new Padding(0, 0, 0, 10) };
+            Card wc2 = new Card { Width = W, Height = 186, Margin = new Padding(0, 0, 0, 10) };
             wc2.Controls.Add(new Label {
                 Text = "Where your watts go", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
-            _barWatts = new StackBar {
-                Location = new Point(14, 36), Size = new Size(W - 30, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Empty = "waiting for a reading on battery" };
-            wc2.Controls.Add(_barWatts);
-
-            wc2.Controls.Add(new Label {
-                Text = "Busiest while that reading was taken", Location = new Point(14, 92), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _contribNote = new Label {
-                Location = new Point(14, 114), Size = new Size(W - 30, 32),
+                Location = new Point(14, 32), Size = new Size(W - 30, 32),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             wc2.Controls.Add(_contribNote);
             _contribList = new Panel {
-                Location = new Point(14, 148), Size = new Size(W - 30, 108), BackColor = Theme.Panel,
+                Location = new Point(14, 66), Size = new Size(W - 30, 108), BackColor = Theme.Panel,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             _contribList.Paint += (s, e) => PaintContributors(e.Graphics);
             wc2.Controls.Add(_contribList);
             InfoDot cdot = new InfoDot {
-                Location = new Point(W - 34, 94), Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Heading = "Busiest while that reading was taken",
+                Location = new Point(W - 34, 12), Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Heading = "Where your watts go",
                 Body = "The processes that burned the most CPU during the same window the watts figure " +
                        "was timed over, so the two describe the same slice of time rather than the draw " +
                        "from a minute ago and whatever happens to be busy this instant.\n\n" +
@@ -703,13 +641,15 @@ namespace PowerDial
                 Location = new Point(14, 228), Size = new Size(W - 30, 38), BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(0, 3), Size = new Size(126, 32) };
-            recheck.Click += (s, e) => { RefreshWatch(); Log("Re-checked what could be waking the GPU."); };
+            recheck.Click += (s, e) => RunBusy(recheck, delegate {
+                RefreshWatch(); Log("Re-checked what could be waking the GPU."); });
             _watchButtons.Controls.Add(recheck);
             PillButton opensettings = new PillButton { Text = "Open Windows settings", Location = new Point(134, 3), Size = new Size(184, 32) };
             opensettings.Click += (s, e) => GpuWatch.OpenBackgroundAppsSettings();
             _watchButtons.Controls.Add(opensettings);
             PillButton reread = new PillButton { Text = "Re-read everything", Location = new Point(326, 3), Size = new Size(160, 32) };
-            reread.Click += (s, e) => { LoadValues(); RefreshWatch(); Log("Re-read every setting from the registry."); };
+            reread.Click += (s, e) => RunBusy(reread, delegate {
+                LoadValues(); RefreshWatch(); Log("Re-read every setting from the registry."); });
             _watchButtons.Controls.Add(reread);
             _watchCard.Controls.Add(_watchButtons);
 
@@ -802,70 +742,57 @@ namespace PowerDial
 
             _chrome.Controls.Add(_navBar);
 
-            // Sits exactly on top of the section bar and takes its place while the app is
-            // working. Same bounds, so nothing reflows mid-operation, and the bar you cannot
-            // use during a write is the one being covered.
-            _busyBar = new Panel {
-                Location = _navBar.Location, Size = _navBar.Size, BackColor = Theme.Ink,
-                Visible = false, Anchor = _navBar.Anchor
-            };
-            _busyBar.Paint += (s, e) => PaintBusy(e.Graphics);
-            _chrome.Controls.Add(_busyBar);
-            _busyBar.BringToFront();
-
             _chrome.Height = _navBar.Bottom + 10;
         }
 
         /// <summary>
-        /// Progress while settings are being written. Determinate rather than a spinner
-        /// because the work is a known list of writes - powercfg is shelled out to twice per
-        /// setting, so a profile is eighteen processes and takes seconds. Before this the
-        /// window simply froze.
+        /// Show the work on the button that was clicked. It used to be a progress bar that
+        /// covered the section strip, which put the feedback nowhere near the thing you had
+        /// just pressed. The arc spins on the button itself; where the work is a countable
+        /// list of writes the count rides beside it, so a profile still says how far along
+        /// it is rather than becoming an indefinite spinner.
+        ///
+        /// The column is disabled either way - queuing clicks onto a half-written scheme is
+        /// how you end up with settings nobody asked for. A disabled parent does not stop
+        /// the button painting itself, and the timer keeps ticking through DoEvents.
         /// </summary>
-        void PaintBusy(Graphics g)
+        void BeginBusy(PillButton on, int steps)
         {
-            Theme.Quality(g);
-            g.Clear(Theme.Ink);
-            int h = _busyBar.Height - 8;
-            Rectangle track = new Rectangle(0, (_busyBar.Height - h) / 2, _busyBar.Width - 4, h);
-            Theme.FillRound(g, track, 4, Theme.Inset, Theme.Edge);
-
-            if (_busyTotal > 0)
+            _busyTotal = steps; _busyDone = 0;
+            _busyBtn = on;
+            if (_busyBtn != null)
             {
-                int w = (int)Math.Round((double)_busyDone / _busyTotal * (track.Width - 2));
-                if (w > 0) Theme.FillRound(g, new Rectangle(track.X + 1, track.Y + 1, w, track.Height - 2), 3, Theme.Save);
+                _busyBtn.Busy = true;
+                _busyBtn.BusyText = steps > 0 ? "0/" + steps : null;
             }
-            Theme.Str(g, _busyText, Theme.Body, Theme.Text, 10, track.Y + (h - 16) / 2f);
-            if (_busyTotal > 0)
-                Theme.StrRight(g, _busyDone + " of " + _busyTotal, Theme.Small, Theme.Dim,
-                               track.Right - 10, track.Y + (h - 14) / 2f);
-        }
-
-        /// <summary>Show the progress bar and lock the column. Always paired with EndBusy.</summary>
-        void BeginBusy(string text, int steps)
-        {
-            _busyText = text; _busyTotal = steps; _busyDone = 0;
-            _navBar.Visible = false;
-            _busyBar.Visible = true;
             _root.Enabled = false;          // no queuing clicks onto a half-written scheme
-            _busyBar.Invalidate();
-            _busyBar.Update();
             Application.DoEvents();
         }
 
-        void BusyStep(string text)
+        void BusyStep()
         {
             _busyDone++;
-            if (text != null) _busyText = text;
-            _busyBar.Invalidate();
-            _busyBar.Update();
+            if (_busyBtn != null && !_busyBtn.IsDisposed && _busyTotal > 0)
+                _busyBtn.BusyText = Math.Min(_busyDone, _busyTotal) + "/" + _busyTotal;
             Application.DoEvents();
+        }
+
+        /// <summary>Spin <paramref name="b"/> for the length of one blocking call. Every
+        /// button that shells out to powercfg or re-probes the GPU goes through here, so
+        /// none of them can look ignored while the window is frozen.</summary>
+        void RunBusy(PillButton b, MethodInvoker work)
+        {
+            BeginBusy(b, 0);
+            try { work(); }
+            finally { EndBusy(); }
         }
 
         void EndBusy()
         {
-            _busyBar.Visible = false;
-            _navBar.Visible = true;
+            // RefreshFixes rebuilds the suggestion cards, so the button that started this
+            // may already have been disposed by the time the work finishes.
+            if (_busyBtn != null && !_busyBtn.IsDisposed) { _busyBtn.Busy = false; _busyBtn.Invalidate(); }
+            _busyBtn = null;
             _root.Enabled = true;
             _busyTotal = 0; _busyDone = 0;
         }
@@ -1280,6 +1207,13 @@ namespace PowerDial
             if (_wake != null) { try { _wake.Set(); } catch (Exception) { } }
             History.SaveOffenders();
             if (_tray != null) _tray.Visible = false;
+
+            // ours to release: three timers, the WMI searchers and the named event
+            _poll.Dispose(); _commit.Dispose(); _tick.Dispose();
+            _bat.Dispose();
+            if (_wake != null) { _wake.Dispose(); _wake = null; }
+            if (_tray != null) { _tray.Dispose(); _tray = null; }
+
             base.OnFormClosing(e);
         }
 
@@ -1326,21 +1260,10 @@ namespace PowerDial
                     }
                 }
 
-                int? b = Brightness.Get();
-                if (b.HasValue) { _brightSlider.Value = b.Value; UpdateBrightLabels(); }
-                else { _brightValue.Text = "n/a"; _brightCost.Text = ""; }
             }
             finally { _loading = false; }
         }
 
-        void UpdateBrightLabels()
-        {
-            _brightValue.Text = _brightSlider.Value + "%";
-            // no figure until the backlight has been measured on this display - a borrowed
-            // number would be wrong by several times between a small dim panel and a big one
-            double? w = Model.Backlight(_brightSlider.Value);
-            _brightCost.Text = w.HasValue ? "~" + w.Value.ToString("0.0") + " W" : "";
-        }
 
         void RefreshProcesses()
         {
@@ -1438,7 +1361,6 @@ namespace PowerDial
                 W = draining ? Math.Round(_bat.Watts.Value, 3) : 0,
                 Pct = _bat.PercentOfFull,
                 Ac = _bat.OnAc,
-                Br = _brightSlider.Value,
                 Cpu = Math.Round(ProcessWatch.TotalCpu(_procs, false), 1),
                 BgMb = Math.Round(ProcessWatch.TotalMb(_procs, true), 0),
                 Top = TopSummary()
@@ -1531,20 +1453,6 @@ namespace PowerDial
 
         void RefreshAnalytics()
         {
-            _barWatts.Segments.Clear();
-            double? perPoint = Model.WattsPerPoint;
-            if (!_bat.OnAc && _bat.Watts.HasValue && _bat.Watts.Value > 0.1 && perPoint.HasValue)
-            {
-                double back = Math.Min(_bat.Watts.Value, _brightSlider.Value * perPoint.Value);
-                double rest = Math.Max(0, _bat.Watts.Value - back);
-                _barWatts.Segments.Add(new Segment { Name = "backlight", Value = back, Color = Theme.Spend });
-                _barWatts.Segments.Add(new Segment { Name = "everything else", Value = rest, Color = Theme.Save });
-            }
-            _barWatts.Empty = perPoint.HasValue
-                ? "waiting for a reading on battery"
-                : "backlight cost has not been measured on this display yet";
-            _barWatts.Invalidate();
-
             _barHealth.Segments.Clear();
             if (_bat.FullChargeMwh.HasValue)
             {
@@ -1791,7 +1699,8 @@ namespace PowerDial
                 Text = s.ActionLabel, Location = new Point(12, 62), Size = new Size(ButtonWidth(s.ActionLabel), 30),
                 Primary = s.CanApply, BackColor = Theme.Inset
             };
-            act.Click += (o, e) => ApplyFix(local);
+            PillButton actLocal = act;
+            act.Click += (o, e) => ApplyFix(local, actLocal);
             c.Controls.Add(act);
 
             // the saving, and the before/after, painted rather than laid out so they can
@@ -1821,22 +1730,27 @@ namespace PowerDial
         /// Carry out one suggestion. Advisory ones open a Windows page instead of writing
         /// anything, and say so in the log rather than claiming a fix.
         /// </summary>
-        void ApplyFix(Suggestion s)
+        void ApplyFix(Suggestion s, PillButton btn)
         {
-            string err = Advisor.Apply(s);
-
+            // Advisory just opens a Windows page - that returns at once, and a spinner on
+            // something instantaneous reads as a glitch rather than as progress.
             if (s.Kind == FixKind.Advisory)
             {
-                if (err != null) { Log("Could not open Windows settings: " + err); ShowLog(); }
+                string aerr = Advisor.Apply(s);
+                if (aerr != null) { Log("Could not open Windows settings: " + aerr); ShowLog(); }
                 else Log("Opened Windows settings for: " + s.Title);
                 return;     // nothing changed here, so nothing to re-read
             }
 
-            if (err != null) { Log(s.Title + " - failed: " + err); ShowLog(); }
-            else Log(s.Title + " - done (" + s.NowText + " to " + s.ThenText + ")");
+            RunBusy(btn, delegate
+            {
+                string err = Advisor.Apply(s);
+                if (err != null) { Log(s.Title + " - failed: " + err); ShowLog(); }
+                else Log(s.Title + " - done (" + s.NowText + " to " + s.ThenText + ")");
 
-            ResetDrawWindow();
-            LoadValues(); RefreshWatch(); RefreshFixes();
+                ResetDrawWindow();
+                LoadValues(); RefreshWatch(); RefreshFixes();
+            });
         }
 
         /// <summary>
@@ -1865,11 +1779,11 @@ namespace PowerDial
                 "Make it last longer", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
-            BeginBusy("Applying " + doable.Count + " change(s)", doable.Count + 1);
+            BeginBusy(_fixApplyAll, doable.Count + 1);
             int ok = 0, fail = 0;
             foreach (Suggestion s in doable)
             {
-                BusyStep(s.Title);
+                BusyStep();
                 string err = Advisor.Apply(s);
                 if (err != null) { Log("   " + s.Title + ": " + err); fail++; }
                 else { Log("   " + s.Title + " -> " + s.ThenText); ok++; }
@@ -1879,7 +1793,7 @@ namespace PowerDial
 
             foreach (PillButton b in _presetBtns) b.Selected = false;
             ResetDrawWindow();
-            BusyStep("Re-checking what is left");
+            BusyStep();
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();
         }
@@ -1911,44 +1825,31 @@ namespace PowerDial
             RefreshFixes();
         }
 
-        void CommitBrightness(int v)
-        {
-            string err = Brightness.Set(v);
-            if (err != null) { Log("Could not change brightness: " + err); ShowLog(); }
-            else { Log("Brightness set to " + v + "%"); ResetDrawWindow(); }
-            UpdateBrightLabels();
-            RefreshFixes();
-        }
 
         void ApplyPreset(Preset p)
         {
             Log("Applying " + p.Name + "...");
-            BeginBusy("Applying " + p.Name, p.Values.Count + (p.Brightness.HasValue ? 1 : 0));
+            PillButton pb = null;
+            foreach (PillButton b in _presetBtns) if (b.Text == p.Name) pb = b;
+            BeginBusy(pb, p.Values.Count + 1);
             int ok = 0, fail = 0;
             foreach (KeyValuePair<string, int> kv in p.Values)
             {
                 Knob k = PowerCfg.Find(kv.Key);
                 if (k == null) continue;
-                BusyStep(p.Name + " - " + k.Label);
+                BusyStep();
                 string err = PowerCfg.WriteDc(k, kv.Value);
                 if (err != null) { Log("   could not set " + k.Label + ": " + err); fail++; continue; }
                 int? back = PowerCfg.Read(k, true);
                 if (back.HasValue && back.Value == kv.Value) { Log("   " + k.Label + " -> " + PowerCfg.Describe(k, kv.Value)); ok++; }
                 else { Log("   " + k.Label + " did not stick"); fail++; }
             }
-            if (p.Brightness.HasValue)
-            {
-                BusyStep(p.Name + " - screen brightness");
-                string berr = Brightness.Set(p.Brightness.Value);
-                if (berr != null) { Log("   could not set brightness: " + berr); fail++; }
-                else { Log("   brightness -> " + p.Brightness.Value + "%"); ok++; }
-            }
             Log(p.Name + ": " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
             if (fail > 0) ShowLog();
 
             foreach (PillButton b in _presetBtns) b.Selected = (b.Text == p.Name);
             ResetDrawWindow();
-            BusyStep("Re-reading what changed");
+            BusyStep();
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();
         }
@@ -1957,10 +1858,6 @@ namespace PowerDial
         {
             BaselineFile bf = Baseline.Load();
             string when = bf.CapturedUtc == "(none)" ? "the tuning session" : bf.CapturedUtc + " UTC";
-            string bright = bf.Brightness.HasValue
-                ? "Screen brightness goes back to " + bf.Brightness.Value + "%.\n"
-                : "Screen brightness is left alone - this restore point predates the app\n" +
-                  "recording it, so there is no level to go back to.\n";
             int withAc = 0;
             foreach (BaselineEntry e in bf.Entries) if (e.AcValue.HasValue) withAc++;
             string acLine = withAc > 0
@@ -1970,19 +1867,17 @@ namespace PowerDial
             DialogResult r = MessageBox.Show(
                 "Put the settings back as they were before PowerDial?\n\n" +
                 "Restore point: " + when + "\n" +
-                acLine + bright,
+                acLine,
                 "Restore my settings", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
             // Restore writes both sides of every setting in one call, so there is no
-            // per-step hook to hang progress on. Say what is happening rather than freeze.
-            BeginBusy("Putting your settings back", 0);
+            // per-step hook to hang progress on - the arc spins with no count.
+            BeginBusy(_btnRestore, 0);
             List<string> lines = Baseline.Restore();
             foreach (string line in lines) Log(line);
             foreach (PillButton b in _presetBtns) b.Selected = false;
             ResetDrawWindow();
-            _busyText = "Re-reading every setting";
-            _busyBar.Invalidate(); _busyBar.Update();
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();
             ShowLog();
@@ -2177,7 +2072,7 @@ namespace PowerDial
         }
 
         /// <summary>One figure in the average band. Returns how far to step right.</summary>
-        float Band(Graphics g, float x, int top, string v, string label, Color c)
+        static float Band(Graphics g, float x, int top, string v, string label, Color c)
         {
             Theme.Str(g, v, Theme.Stat, c, x, top + 22);
             Theme.Str(g, label, Theme.Small, Theme.Dim, x + 2, top + 47);
@@ -2185,7 +2080,7 @@ namespace PowerDial
             return w + 28;
         }
 
-        void Stat(Graphics g, float x, string v, string label, Color c)
+        static void Stat(Graphics g, float x, string v, string label, Color c)
         {
             // 11/37 rather than 14/40: it lifts the caption clear of the state line, which
             // shares its row with the unit at the far left

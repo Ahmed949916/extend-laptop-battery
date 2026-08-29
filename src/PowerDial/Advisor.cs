@@ -8,7 +8,6 @@ namespace PowerDial
     public enum FixKind
     {
         Setting,      // writes one power setting on the battery side
-        Brightness,   // moves the panel backlight
         Advisory      // nothing this app can safely write - opens the place you do it
     }
 
@@ -83,7 +82,6 @@ namespace PowerDial
             // battery. Suggesting those writes on a desktop would be theatre.
             if (Machine.HasBattery)
             {
-                AddBrightness(list);
                 AddPowerSettings(list);
             }
 
@@ -174,42 +172,6 @@ namespace PowerDial
             });
         }
 
-        static void AddBrightness(List<Suggestion> list)
-        {
-            if (!Machine.BrightnessControllable) return;
-            int? cur = Brightness.Get();
-            if (!cur.HasValue || cur.Value <= 60) return;
-
-            const int target = 40;
-            double? gain = null;
-            double? a = Model.Backlight(cur.Value);
-            double? b = Model.Backlight(target);
-            if (a.HasValue && b.HasValue) gain = a.Value - b.Value;
-
-            list.Add(new Suggestion {
-                Id = "brightness",
-                Kind = FixKind.Brightness,
-                Rank = 85,
-                Target = target,
-                Current = cur.Value,
-                NowText = cur.Value + "%",
-                ThenText = target + "%",
-                Title = "Turn the screen down from " + cur.Value + "% to " + target + "%",
-                Detail = "The biggest lever you hold directly, and it bites hardest when the machine is " +
-                         "otherwise quiet. Move it straight back if it is too dim to work with.",
-                Info = "Backlight power scales with brightness, and on a laptop doing nothing very much it " +
-                       "can be a large share of the whole draw.\n\n" +
-                       "How large depends entirely on the panel - a small dim display and a big bright one " +
-                       "differ by several times - so no watt figure is quoted here unless it has been " +
-                       "measured on this display.\n\n" +
-                       "Around 40% indoors is comfortable for most people and roughly where the sweet spot " +
-                       "sits. Below 20% you are chasing minutes at real cost to your eyes. This is the one " +
-                       "suggestion here you will notice immediately, and the one easiest to undo: the " +
-                       "brightness slider is right below.",
-                ActionLabel = "Turn it down",
-                Gain = gain
-            });
-        }
 
         static void AddPowerSettings(List<Suggestion> list)
         {
@@ -415,17 +377,6 @@ namespace PowerDial
                 catch (Exception ex) { return ex.Message; }
             }
 
-            if (s.Kind == FixKind.Brightness)
-            {
-                string err = Brightness.Set(s.Target);
-                if (err != null) return err;
-                int? back = Brightness.Get();
-                if (!back.HasValue) return null;   // set worked, this panel just will not report
-                // plenty of panels only expose a handful of levels and snap to the nearest
-                if (Math.Abs(back.Value - s.Target) > 5)
-                    return "asked for " + s.Target + "%, the display settled on " + back.Value + "%";
-                return null;
-            }
 
             Knob k = PowerCfg.Find(s.KnobKey);
             if (k == null) return "no such setting";

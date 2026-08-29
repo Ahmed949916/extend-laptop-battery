@@ -19,10 +19,6 @@ namespace PowerDial
         /// <summary>Original design capacity in mWh. Null = use whatever Machine detected.</summary>
         public int? DesignCapacityMwh { get; set; }
 
-        /// <summary>Watts per brightness point, measured on this panel. Null = not measured.</summary>
-        public double? WattsPerBrightnessPoint { get; set; }
-        public string BrightnessMeasuredOn { get; set; }
-
         /// <summary>Extra cost of the discrete GPU being awake, watts. Null = not measured.</summary>
         public double? DiscreteGpuWakeWatts { get; set; }
         public string GpuWakeMeasuredOn { get; set; }
@@ -32,6 +28,10 @@ namespace PowerDial
 
         static Config _current;
         static readonly object Gate = new object();
+
+        // one instance, reused - building it per save allocated a fresh serialiser cache
+        static readonly JsonSerializerOptions Pretty =
+            new JsonSerializerOptions { WriteIndented = true };
 
         public static string Path
         {
@@ -72,8 +72,7 @@ namespace PowerDial
                     Config c = Current;
                     c.Version = 1;
                     Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path));
-                    File.WriteAllText(Path,
-                        JsonSerializer.Serialize(c, new JsonSerializerOptions { WriteIndented = true }));
+                    File.WriteAllText(Path, JsonSerializer.Serialize(c, Pretty));
                 }
                 catch { }
             }
@@ -91,23 +90,6 @@ namespace PowerDial
             }
         }
 
-        /// <summary>
-        /// Backlight cost per brightness point. Null until measured on this display.
-        /// There is no sensible default: a 13 inch 1080p panel and a 17 inch 4K panel
-        /// differ by several times, so guessing would be worse than saying nothing.
-        /// </summary>
-        public static double? BacklightWattsPerPoint
-        {
-            get { return Current.WattsPerBrightnessPoint; }
-        }
-
-        public static void SetBacklight(double wattsPerPoint)
-        {
-            Current.WattsPerBrightnessPoint = wattsPerPoint;
-            Current.BrightnessMeasuredOn = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
-            Save();
-        }
-
         public static void SetGpuWake(double watts)
         {
             Current.DiscreteGpuWakeWatts = watts;
@@ -115,27 +97,4 @@ namespace PowerDial
             Save();
         }
     }
-
-    /// <summary>
-    /// The backlight cost, in watts per brightness point. Measured on this display by
-    /// holding everything else still, and stored per machine - never assumed, because a
-    /// small dim panel and a large bright one differ by several times.
-    ///
-    /// Modelled runtime curves used to live here and were removed. Everything on screen
-    /// comes from this machine, now.
-    /// </summary>
-    public static class Model
-    {
-        /// <summary>Null until measured on this display. Panels differ by several times,
-        /// so a default would be worse than admitting we do not know.</summary>
-        public static double? WattsPerPoint { get { return Config.BacklightWattsPerPoint; } }
-
-        /// <summary>Backlight watts at the given brightness, or null if uncalibrated.</summary>
-        public static double? Backlight(int brightness)
-        {
-            double? w = WattsPerPoint;
-            return w.HasValue ? (double?)(brightness * w.Value) : null;
-        }
-    }
-
 }

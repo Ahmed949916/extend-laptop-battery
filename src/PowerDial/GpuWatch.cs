@@ -226,7 +226,7 @@ namespace PowerDial
                     {
                         string name;
                         try { name = p.ProcessName; } catch { continue; }
-                        if (name.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0) n++;
+                        if (name.Contains(fragment, StringComparison.OrdinalIgnoreCase)) n++;
                     }
                 }
             }
@@ -248,7 +248,7 @@ namespace PowerDial
                         string product = Pretty(pkg);
                         bool interesting = false;
                         foreach (string[] entry in BgPackages)
-                            if (product.IndexOf(entry[0], StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            if (product.Contains(entry[0], StringComparison.OrdinalIgnoreCase) &&
                                 VendorApplies(entry[1])) interesting = true;
                         if (!interesting) continue;
 

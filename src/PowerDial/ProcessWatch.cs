@@ -26,7 +26,7 @@ namespace PowerDial
     /// </summary>
     public class ProcessWatch
     {
-        class Prev { public TimeSpan Cpu; public DateTime At; }
+        sealed class Prev { public TimeSpan Cpu; public DateTime At; }
 
         readonly Dictionary<string, Prev> _prev = new Dictionary<string, Prev>();
         readonly int _cores = Math.Max(1, Environment.ProcessorCount);
@@ -36,7 +36,7 @@ namespace PowerDial
 
         public ProcessWatch()
         {
-            try { _selfId = Process.GetCurrentProcess().Id; } catch { _selfId = -1; }
+            try { _selfId = Environment.ProcessId; } catch (Exception) { _selfId = -1; }
         }
 
         /// <summary>

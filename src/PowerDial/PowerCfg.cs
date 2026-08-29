@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Principal;
 using Microsoft.Win32;
 
@@ -122,7 +123,7 @@ namespace PowerDial
                 Info = "How long the screen stays lit with no input. The backlight is worth up to 4 W, so this " +
                        "is real money, but only while you are away from the machine. It changes nothing about " +
                        "what you draw while actually using it.\n\n" +
-                       "To cut backlight power while you are working, use the brightness slider instead."
+                       "It changes nothing while you are actually using the machine."
             },
             new Knob {
                 Key = "sleepidle", Label = "Sleep after",
@@ -343,9 +344,9 @@ namespace PowerDial
                     {
                         string msg = (se + " " + so).Trim();
                         if (msg.Length == 0) msg = "powercfg exited with code " + p.ExitCode;
-                        if (msg.IndexOf("privilege", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            msg.IndexOf("elevated", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            msg.IndexOf("denied", StringComparison.OrdinalIgnoreCase) >= 0)
+                        if (msg.Contains("privilege", StringComparison.OrdinalIgnoreCase) ||
+                            msg.Contains("elevated", StringComparison.OrdinalIgnoreCase) ||
+                            msg.Contains("denied", StringComparison.OrdinalIgnoreCase))
                             msg = "needs administrator - use Run as admin";
                         return msg;
                     }
@@ -359,7 +360,11 @@ namespace PowerDial
         {
             if (!value.HasValue) return "unknown";
             if (knob.Choices != null)
-                return knob.Choices.ContainsKey(value.Value) ? knob.Choices[value.Value] : value.Value.ToString();
+            {
+                string choice;
+                if (knob.Choices.TryGetValue(value.Value, out choice)) return choice;
+                return value.Value.ToString(CultureInfo.CurrentCulture);
+            }
             if (knob.Unit == "s")
             {
                 int s = value.Value;

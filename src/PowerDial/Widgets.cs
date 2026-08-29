@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
@@ -118,6 +119,82 @@ namespace PowerDial
         public string Glyph;              // optional Segoe Fluent Icons glyph
         bool _hot, _down;
 
+        // --- working state ----------------------------------------------------------
+        // The work behind a button is synchronous and pumps with Application.DoEvents, so
+        // a plain Timer still ticks while it runs - which is what makes the arc turn
+        // instead of freezing at whatever angle the click left it on.
+        bool _busy;
+        int _angle;
+        string _busyText;
+        Timer _spin;
+
+        /// <summary>Spin an arc where the label normally goes. The button keeps its size,
+        /// so nothing around it reflows while the work happens.</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool Busy
+        {
+            get { return _busy; }
+            set
+            {
+                if (_busy == value) return;
+                _busy = value;
+                _angle = 0;
+                if (_busy)
+                {
+                    if (_spin == null)
+                    {
+                        _spin = new Timer();
+                        _spin.Interval = 45;
+                        _spin.Tick += delegate { _angle = (_angle + 24) % 360; Invalidate(); Update(); };
+                    }
+                    _spin.Start();
+                }
+                else
+                {
+                    if (_spin != null) _spin.Stop();
+                    _busyText = null;
+                }
+                Invalidate();
+            }
+        }
+
+        /// <summary>Optional caption beside the arc - "4/18" while a list is being written.
+        /// Null spins with no text, for work with no countable steps.</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string BusyText
+        {
+            set { _busyText = value; Invalidate(); Update(); }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _spin != null) { _spin.Stop(); _spin.Dispose(); _spin = null; }
+            base.Dispose(disposing);
+        }
+
+        /// <summary>The turning arc. A 280-degree sweep so the gap reads as motion; drawn
+        /// on the same green as everything else that means the app is doing something.</summary>
+        void PaintSpinner(Graphics g, Color fg)
+        {
+            int d = Math.Min(16, Height - 12);
+            if (d < 8) d = 8;
+            string cap = _busyText;
+            float capw = string.IsNullOrEmpty(cap) ? 0 : g.MeasureString(cap, Theme.Small).Width + 6;
+            float x = (Width - d - capw) / 2f;
+            float y = (Height - d) / 2f;
+
+            using (Pen p = new Pen(Theme.Edge, 2f))
+                g.DrawEllipse(p, x, y, d, d);
+            using (Pen p = new Pen(fg, 2f))
+            {
+                p.StartCap = LineCap.Round; p.EndCap = LineCap.Round;
+                g.DrawArc(p, x, y, d, d, _angle, 280);
+            }
+            if (!string.IsNullOrEmpty(cap))
+                Theme.Str(g, cap, Theme.Small, Theme.Dim, x + d + 6,
+                          (Height - g.MeasureString(cap, Theme.Small).Height) / 2f);
+        }
+
         public PillButton()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
@@ -146,15 +223,17 @@ namespace PowerDial
             }
 
             Color fill, border, fg;
-            if (Selected)      { fill = Theme.Raise; border = Theme.Dim;   fg = Theme.Text; }
+            if (Selected)      { fill = Theme.Raise; border = Theme.Save;  fg = Theme.Text; }
             else if (Primary)  { fill = Theme.Inset; border = Theme.Save;  fg = Theme.Save; }
             else               { fill = Theme.Inset; border = Theme.Edge;  fg = Theme.Text; }
 
             if (_down) fill = ControlPaint.Dark(fill, 0.06f);
-            else if (_hot && !Selected) border = Theme.Save;
+            else if (_hot && !Selected) border = Theme.Hair;   // green now means "active"; hover must not claim it
             else if (_hot) fill = ControlPaint.Light(fill, 0.10f);
 
             Theme.FillRound(g, r, 8, fill, border);
+
+            if (_busy) { PaintSpinner(g, Primary ? Theme.Save : fg); return; }
 
             float tx = 0;
             SizeF ts = g.MeasureString(Text, Theme.Title);
@@ -187,12 +266,13 @@ namespace PowerDial
             else if (_hot) Theme.FillRound(g, body, 7, Theme.Inset);
 
             Color fg = (Selected || _hot) ? Theme.Text : Theme.Dim;
+            if (_busy) { PaintSpinner(g, Theme.Save); return; }
             SizeF ts = g.MeasureString(Text, Theme.Tab);
             Theme.Str(g, Text, Theme.Tab, fg,
                       (Width - ts.Width) / 2f, (body.Height - ts.Height) / 2f);
 
             if (Selected)
-                using (SolidBrush b = new SolidBrush(Theme.Text))
+                using (SolidBrush b = new SolidBrush(Theme.Save))
                     g.FillRectangle(b, 6, Height - bar, Math.Max(0, Width - 12), bar);
 
             if (Focused)
@@ -207,9 +287,9 @@ namespace PowerDial
             OnClick(EventArgs.Empty);
         }
 
-        protected override bool IsInputKey(Keys k)
+        protected override bool IsInputKey(Keys keyData)
         {
-            return k == Keys.Space || k == Keys.Enter || base.IsInputKey(k);
+            return keyData == Keys.Space || keyData == Keys.Enter || base.IsInputKey(keyData);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -240,6 +320,7 @@ namespace PowerDial
 
         public event EventHandler ValueChanged;
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Value
         {
             get { return _value; }
@@ -321,10 +402,11 @@ namespace PowerDial
         // deliberately swallowed - see the class comment
         protected override void OnMouseWheel(MouseEventArgs e) { }
 
-        protected override bool IsInputKey(Keys k)
+        protected override bool IsInputKey(Keys keyData)
         {
-            if (k == Keys.Left || k == Keys.Right || k == Keys.Home || k == Keys.End) return true;
-            return base.IsInputKey(k);
+            if (keyData == Keys.Left || keyData == Keys.Right ||
+                keyData == Keys.Home || keyData == Keys.End) return true;
+            return base.IsInputKey(keyData);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -368,6 +450,7 @@ namespace PowerDial
 
         public List<string> Items { get { return _items; } }
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int SelectedIndex
         {
             get { return _index; }
@@ -394,9 +477,10 @@ namespace PowerDial
             base.OnClick(e);
         }
 
-        protected override bool IsInputKey(Keys k)
+        protected override bool IsInputKey(Keys keyData)
         {
-            return k == Keys.Space || k == Keys.Enter || k == Keys.Down || k == Keys.Up || base.IsInputKey(k);
+            return keyData == Keys.Space || keyData == Keys.Enter ||
+                   keyData == Keys.Down || keyData == Keys.Up || base.IsInputKey(keyData);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -412,7 +496,7 @@ namespace PowerDial
             if (_open || _items.Count == 0) return;
             _open = true;
             _popup = new PickerPopup(this);
-            _popup.Closed += (s, e) => { _open = false; _popup = null; Invalidate(); };
+            _popup.FormClosed += (s, e) => { _open = false; _popup = null; Invalidate(); };
             _popup.ShowFor(this);
             Invalidate();
         }
@@ -446,7 +530,7 @@ namespace PowerDial
     }
 
     /// <summary>The list that drops out of a Picker.</summary>
-    public class PickerPopup : Form
+    public sealed class PickerPopup : Form
     {
         readonly Picker _owner;
         int _hover = -1;

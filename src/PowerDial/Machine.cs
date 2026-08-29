@@ -9,7 +9,7 @@ namespace PowerDial
 {
     public enum GpuVendor { Unknown, Nvidia, Amd, Intel }
 
-    public class GpuInfo
+    public sealed class GpuInfo
     {
         public string Name;
         public GpuVendor Vendor;

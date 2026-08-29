@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace PowerDial
 {
-    public class MainForm : Form
+    public sealed class MainForm : Form
     {
         // Everything is laid out once at this width, then stretched to the window by
         // Relayout. Building at a fixed width keeps the arithmetic in one place; the
@@ -108,7 +108,10 @@ namespace PowerDial
         public const string WakeEvent = "PowerDial.ShowWindow";
 
         System.Threading.EventWaitHandle _wake;
-        bool _quitting, _saidWhereItWent;
+        // Written on the UI thread by Quit/OnFormClosing, read by the relaunch-wait thread.
+        // Without volatile the JIT is free to hoist that read out of the wait loop.
+        volatile bool _quitting;
+        bool _saidWhereItWent;
 
         public MainForm()
         {
@@ -1366,6 +1369,16 @@ namespace PowerDial
                 Top = TopSummary()
             };
             History.Append(p, _procs, interval);
+
+            // Saving is best-effort by design, but a failure used to be invisible. Anything
+            // that could not be written says so here, once per distinct reason.
+            List<string> problems = Diag.Drain();
+            if (problems != null)
+            {
+                foreach (string line in problems) Log(line);
+                ShowLog();
+            }
+
             if (draining) _chartWatts.Push(p.W);
             RefreshHistory(false);
         }
@@ -1935,7 +1948,7 @@ namespace PowerDial
     }
 
     /// <summary>The header instrument: watts, what is left, charge, health, and the trace.</summary>
-    public class Readout : Card
+    public sealed class Readout : Card
     {
         public bool OnAc, Charging;
         public bool HasBattery = true;

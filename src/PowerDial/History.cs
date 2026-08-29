@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace PowerDial
 {
     /// <summary>One recorded moment.</summary>
-    public class HistPoint
+    public sealed class HistPoint
     {
         public long T { get; set; }          // unix seconds, UTC
         public double W { get; set; }        // watts drawn; 0 when unknown or on AC
@@ -25,7 +25,7 @@ namespace PowerDial
     }
 
     /// <summary>Cumulative tally for one process name, across every recorded session.</summary>
-    public class Offender
+    public sealed class Offender
     {
         public string Name { get; set; }
         public double CpuSeconds { get; set; }   // core-seconds burned while recording
@@ -51,7 +51,7 @@ namespace PowerDial
     {
         public const int KeepMonths = 3;
 
-        static readonly object Gate = new object();
+        static readonly System.Threading.Lock Gate = new System.Threading.Lock();
         static Dictionary<string, Offender> _offenders;
         static int _sinceFlush;
 
@@ -80,9 +80,11 @@ namespace PowerDial
                 {
                     Directory.CreateDirectory(Folder);
                     File.AppendAllText(MonthFile(DateTime.UtcNow),
-                        JsonSerializer.Serialize(p) + Environment.NewLine);
+                        JsonSerializer.Serialize(p, CompactJson.Default.HistPoint) + Environment.NewLine);
                 }
-                catch { /* a full or locked disk must not take the app down */ }
+                // A full or locked disk must not take the app down - but it must not be
+                // silent either, or the charts quietly stop growing and nothing says why.
+                catch (Exception ex) { Diag.WriteFailed("this minute's history line", ex); }
 
                 if (procs != null) Tally(procs, intervalSeconds, p.T);
 
@@ -120,8 +122,8 @@ namespace PowerDial
             {
                 if (File.Exists(OffendersFile))
                 {
-                    List<Offender> list = JsonSerializer.Deserialize<List<Offender>>(
-                        File.ReadAllText(OffendersFile));
+                    List<Offender> list = JsonSerializer.Deserialize(
+                        File.ReadAllText(OffendersFile), CompactJson.Default.ListOffender);
                     if (list != null)
                         foreach (Offender o in list)
                             if (!string.IsNullOrEmpty(o.Name)) _offenders[o.Name] = o;
@@ -138,9 +140,9 @@ namespace PowerDial
                 Dictionary<string, Offender> map = LoadOffenders();
                 Directory.CreateDirectory(Folder);
                 List<Offender> list = new List<Offender>(map.Values);
-                File.WriteAllText(OffendersFile, JsonSerializer.Serialize(list));
+                File.WriteAllText(OffendersFile, JsonSerializer.Serialize(list, CompactJson.Default.ListOffender));
             }
-            catch { }
+            catch (Exception ex) { Diag.WriteFailed("the per-process tally (offenders.json)", ex); }
         }
 
         /// <summary>
@@ -155,7 +157,7 @@ namespace PowerDial
                 _offenders = new Dictionary<string, Offender>();
                 _sinceFlush = 0;
                 try { if (File.Exists(OffendersFile)) File.Delete(OffendersFile); }
-                catch { }
+                catch (Exception ex) { Diag.WriteFailed("the cleared tally (offenders.json could not be deleted)", ex); }
             }
         }
 
@@ -189,7 +191,7 @@ namespace PowerDial
                         if (line.Length < 5) continue;
                         try
                         {
-                            HistPoint p = JsonSerializer.Deserialize<HistPoint>(line);
+                            HistPoint p = JsonSerializer.Deserialize(line, CompactJson.Default.HistPoint);
                             if (p != null && p.T > 0) outp.Add(p);
                         }
                         catch { }
@@ -201,7 +203,7 @@ namespace PowerDial
             return outp;
         }
 
-        public class Stats
+        public sealed class Stats
         {
             public int Points;
             public DateTime First, Last;

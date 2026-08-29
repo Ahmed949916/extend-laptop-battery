@@ -13,6 +13,7 @@
         "packagesPath": "C:\\Users\\hp\\.nuget\\packages\\",
         "outputPath": "C:\\Users\\hp\\Desktop\\control-battery\\src\\PowerDial\\obj\\",
         "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
         "configFilePaths": [
           "C:\\Users\\hp\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
@@ -30,6 +31,7 @@
           }
         },
         "warningProperties": {
+          "allWarningsAsErrors": true,
           "warnAsError": [
             "NU1605"
           ]
@@ -48,8 +50,12 @@
           "dependencies": {
             "System.Management": {
               "target": "Package",
-              "version": "[10.0.0, )"
+              "version": "[10.0.11, )",
+              "versionCentrallyManaged": true
             }
+          },
+          "centralPackageVersions": {
+            "System.Management": "10.0.11"
           },
           "imports": [
             "net461",

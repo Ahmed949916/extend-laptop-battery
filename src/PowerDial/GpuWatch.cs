@@ -5,7 +5,7 @@ using Microsoft.Win32;
 
 namespace PowerDial
 {
-    public class Finding
+    public sealed class Finding
     {
         public string Name;
         public bool Ok;

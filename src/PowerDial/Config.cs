@@ -12,7 +12,7 @@ namespace PowerDial
     /// detection or by measuring. A null value means "not known on this PC yet", and the
     /// interface says so rather than showing a number borrowed from someone else's machine.
     /// </summary>
-    public class Config
+    public sealed class Config
     {
         public int Version { get; set; }
 
@@ -27,11 +27,9 @@ namespace PowerDial
         public int WindowSeconds { get; set; }
 
         static Config _current;
-        static readonly object Gate = new object();
+        static readonly System.Threading.Lock Gate = new System.Threading.Lock();
 
-        // one instance, reused - building it per save allocated a fresh serialiser cache
-        static readonly JsonSerializerOptions Pretty =
-            new JsonSerializerOptions { WriteIndented = true };
+        // Options now live on PrettyJson, baked in when the serialiser is generated.
 
         public static string Path
         {
@@ -53,7 +51,7 @@ namespace PowerDial
                     try
                     {
                         if (File.Exists(Path))
-                            _current = JsonSerializer.Deserialize<Config>(File.ReadAllText(Path));
+                            _current = JsonSerializer.Deserialize(File.ReadAllText(Path), PrettyJson.Default.Config);
                     }
                     catch { }
                     if (_current == null) _current = new Config();
@@ -72,9 +70,9 @@ namespace PowerDial
                     Config c = Current;
                     c.Version = 1;
                     Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path));
-                    File.WriteAllText(Path, JsonSerializer.Serialize(c, Pretty));
+                    File.WriteAllText(Path, JsonSerializer.Serialize(c, PrettyJson.Default.Config));
                 }
-                catch { }
+                catch (Exception ex) { Diag.WriteFailed("what has been measured on this PC (config.json)", ex); }
             }
         }
 

@@ -8,7 +8,7 @@ using Microsoft.Win32;
 namespace PowerDial
 {
     /// <summary>One tunable Windows power setting.</summary>
-    public class Knob
+    public sealed class Knob
     {
         public string Key;          // short id used by presets
         public string Label;

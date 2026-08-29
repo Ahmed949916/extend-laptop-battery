@@ -7,7 +7,7 @@ using System.Windows.Forms;
 namespace PowerDial
 {
     /// <summary>Watts over time, with min / average / max called out.</summary>
-    public class LineChart : Control
+    public sealed class LineChart : Control
     {
         readonly List<double> _pts = new List<double>();
         public int Capacity = 240;
@@ -108,7 +108,7 @@ namespace PowerDial
     /// rather than only the current one. Amber where the machine was on battery,
     /// dim where it was plugged in.
     /// </summary>
-    public class BatteryChart : Control
+    public sealed class BatteryChart : Control
     {
         List<HistPoint> _pts = new List<HistPoint>();
         public string Empty = "no history recorded yet";
@@ -175,7 +175,7 @@ namespace PowerDial
     /// whichever column is being sorted on, so the shape of the list is readable
     /// before any of the numbers are.
     /// </summary>
-    public class ProcessTable : Control
+    public sealed class ProcessTable : Control
     {
         public List<ProcInfo> Rows = new List<ProcInfo>();
         public bool SortByCpu = false;
@@ -251,7 +251,7 @@ namespace PowerDial
         }
     }
 
-    public class Segment
+    public sealed class Segment
     {
         public string Name;
         public double Value;
@@ -259,7 +259,7 @@ namespace PowerDial
     }
 
     /// <summary>Horizontal stacked bar with a labelled legend underneath.</summary>
-    public class StackBar : Control
+    public sealed class StackBar : Control
     {
         public List<Segment> Segments = new List<Segment>();
         public string Unit = "W";

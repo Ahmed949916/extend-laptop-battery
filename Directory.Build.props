@@ -1,0 +1,56 @@
+<Project>
+
+  <!--
+    Shared by both projects. These six properties used to be copied into each .csproj,
+    including the whole NoWarn list - and SelfTest compiles PowerDial's own source files,
+    so the two drifting apart meant compiling the same code under different rules.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Plain C# on purpose. See CLAUDE.md: no implicit usings, no nullable annotations. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- The build is clean, so a new warning is news. Keeping it that way is the point. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      Six rules are off deliberately, not because they were tedious:
+
+      CA1051 (no public fields) - every widget in Widgets.cs exposes plain fields, which is
+      how this codebase is written on purpose. Turning ~110 of them into properties would
+      also trip WFO1000 on each one, since a property on a Control has to declare how the
+      designer serialises it. Large, risky, and buys nothing.
+
+      CA1305 (pass IFormatProvider) - every hit is a number or date being formatted for
+      display, where following the user's locale is the correct behaviour. Everything that
+      is parsed or persisted already pins InvariantCulture: History.MonthFile, the month
+      TryParseExact, and System.Text.Json throughout.
+
+      CA1707 (no underscores) - the SUB_PROCESSOR / SUB_VIDEO constants are Windows power
+      subgroup GUIDs and read better matching Microsoft's own naming.
+
+      CA1507 (use nameof) - the literals are WMI property names like "Charging" and
+      "Manufacturer" that happen to match a C# member. nameof would tie a WMI schema name
+      to a local identifier, so renaming the field would silently break the query.
+
+      CA1805 (do not initialise to default) - Slider.Minimum = 0 and Sparkline.Floor = 0
+      state a widget's intended default on its public surface. Deleting them saves nothing
+      and hides the contract.
+
+      CA1720 (identifier contains type name) - Knob.Guid holds a Windows setting GUID.
+      That is what it is called everywhere in Microsoft's own documentation.
+    -->
+    <NoWarn>$(NoWarn);CA1051;CA1305;CA1707;CA1507;CA1805;CA1720</NoWarn>
+  </PropertyGroup>
+
+</Project>

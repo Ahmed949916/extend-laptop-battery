@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace PowerDial
 {
-    public class Preset
+    public sealed class Preset
     {
         public string Name;
         public string Blurb;

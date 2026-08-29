@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace PowerDial
 {
-    public class BatterySample
+    public sealed class BatterySample
     {
         public DateTime At;
         public int RemainingMwh;
@@ -19,7 +19,7 @@ namespace PowerDial
     /// the same way it was measured by hand: time the battery energy counter over a
     /// window and divide. That means the first reading needs WindowSeconds to appear.
     /// </summary>
-    public class BatteryMonitor : IDisposable
+    public sealed class BatteryMonitor : IDisposable
     {
         /// <summary>
         /// Original design capacity in mWh, detected per machine. 0 when it cannot be

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using PowerDial;
 
-class SelfTest
+sealed class SelfTest
 {
     static int fail = 0;
 

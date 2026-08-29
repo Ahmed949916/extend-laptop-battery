@@ -1,51 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shared settings live in Directory.Build.props / Directory.Packages.props at the root. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <Nullable>disable</Nullable>
-    <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>PowerDial</AssemblyName>
     <RootNamespace>PowerDial</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon></ApplicationIcon>
-    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <!--
-      Three rules are switched off deliberately, not because they were tedious:
-
-      CA1051 (no public fields) - every widget in Widgets.cs exposes plain fields, which is
-      how this codebase is written on purpose. Turning ~110 of them into properties would
-      also trip WFO1000 on each one, since a property on a Control has to declare how the
-      designer serialises it. Large, risky, and buys nothing.
-
-      CA1305 (pass IFormatProvider) - every hit is a number or date being formatted for
-      display, where following the user's locale is the correct behaviour. Everything that
-      is parsed or persisted already pins InvariantCulture: History.MonthFile, the month
-      TryParseExact, and System.Text.Json throughout.
-
-      CA1707 (no underscores) - the SUB_PROCESSOR / SUB_VIDEO constants are Windows power
-      subgroup GUIDs and read better matching Microsoft's own naming.
-    -->
-    <!--
-      Three more, for the same reason - following them would make the code worse:
-
-      CA1507 (use nameof) - the literals are WMI property names like "Charging" and
-      "Manufacturer" that happen to match a C# member. nameof would tie a WMI schema name
-      to a local identifier, so renaming the field would silently break the query.
-
-      CA1805 (do not initialise to default) - Slider.Minimum = 0 and Sparkline.Floor = 0
-      state a widget's intended default on its public surface. Deleting them saves nothing
-      and hides the contract.
-
-      CA1720 (identifier contains type name) - Knob.Guid holds a Windows setting GUID.
-      That is what it is called everywhere in Microsoft's own documentation.
-    -->
-    <NoWarn>$(NoWarn);CA1051;CA1305;CA1707;CA1507;CA1805;CA1720</NoWarn>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="System.Management" />
   </ItemGroup>
+
 </Project>

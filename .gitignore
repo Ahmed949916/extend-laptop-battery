@@ -1,0 +1,8 @@
+# Build output. Note the runnable copy at the repo root is deliberately committed -
+# PowerDial.exe / PowerDial.dll / runtimes/ are how the app is handed to someone - so
+# this only ignores the per-project intermediate and output folders.
+src/*/bin/
+src/*/obj/
+
+# Local scratch
+*.user

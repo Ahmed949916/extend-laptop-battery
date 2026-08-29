@@ -14,15 +14,32 @@ the code.
 
     PowerDial.exe                                       run it
 
+    dotnet build -c Release                             from the repo root: both projects
+
     cd src\PowerDial
-    dotnet build -c Release
     dotnet publish -c Release -o %TEMP%\pd-publish      then copy over the runnable copy
     copy /y %TEMP%\pd-publish\* ..\..
 
     cd src\PowerDial-selftest && dotnet run -c Release   read-only, checks the live machine
 
-.NET 10 SDK (10.0.400), `net10.0-windows`, `UseWindowsForms`. NuGet works; only dependency is
-`System.Management`. `msbuild` is not on PATH — use `dotnet build`.
+.NET 10 SDK, pinned by `global.json` to 10.0.400 with `rollForward: latestFeature`.
+`net10.0-windows`, `UseWindowsForms`. `msbuild` is not on PATH — use `dotnet build`.
+
+**Build settings live at the repo root, not in the .csproj files.** `Directory.Build.props`
+holds the target framework, the plain-C# switches, the analyzer settings and the whole
+`NoWarn` list with the reasoning for each suppression; `Directory.Packages.props` holds the
+one package version centrally. Both .csproj files used to carry their own copy of all of
+it, and since the selftest compiles the app's own code, the two drifting apart meant
+building the same source under different rules. `PowerDial.slnx` ties them together — build
+from the root and both are covered.
+
+**Warnings are errors.** The build is clean, so a new warning is news rather than noise.
+Suppressions go in the `NoWarn` list at the root, with a comment saying why — never a
+`#pragma` at the call site.
+
+**The selftest references the app project.** It used to list the app's source files
+one by one, which went stale silently every time the app gained a file. It enables
+`UseWindowsForms` only because the app it references is a WinExe.
 
 **Run the selftest after any change.** It is read-only and takes about half a minute.
 
@@ -293,6 +310,15 @@ One scrolling column, about three screens long, with two things pinned above it 
 
 ## Editing notes
 
+- **JSON goes through `Json.cs`.** `PrettyJson` and `CompactJson` are source-generated
+  contexts — no reflection on the startup or once-a-minute paths, and the on-disk shape is
+  identical to what reflection produced. Adding a persisted type means adding a
+  `[JsonSerializable]` line, not a `JsonSerializer.Serialize<T>` call.
+- **A swallowed write failure goes to `Diag`.** Persistence catches everything on purpose —
+  a full or locked disk must not take a tray app down — but silence meant the tally could
+  stop saving and nothing said so. `Diag.WriteFailed` records the reason, the poll drains it
+  into the Activity log, and each distinct reason is reported once. Reads are deliberately
+  not routed there: a missing file on first run is normal, not a fault.
 - Plain C#: `ImplicitUsings` and `Nullable` are **disabled**. No file-scoped namespaces, no
   target-typed `new`, no `?.` on the WinForms tree where the old style is used.
 - Writing C# via a bash heredoc in this environment mangles apostrophes and backslashes —

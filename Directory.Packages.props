@@ -1,0 +1,16 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!--
+    One version, both projects. SelfTest compiles PowerDial's own source files, so a
+    mismatch here would mean testing that code against a different System.Management
+    than the app ships with.
+  -->
+  <ItemGroup>
+    <PackageVersion Include="System.Management" Version="10.0.11" />
+  </ItemGroup>
+
+</Project>

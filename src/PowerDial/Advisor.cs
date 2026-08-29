@@ -11,7 +11,7 @@ namespace PowerDial
         Advisory      // nothing this app can safely write - opens the place you do it
     }
 
-    public class Suggestion
+    public sealed class Suggestion
     {
         public string Id;
         public string Title;        // one line, says what to do

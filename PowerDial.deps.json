@@ -8,25 +8,25 @@
     ".NETCoreApp,Version=v10.0": {
       "PowerDial/1.0.0": {
         "dependencies": {
-          "System.Management": "10.0.0"
+          "System.Management": "10.0.11"
         },
         "runtime": {
           "PowerDial.dll": {}
         }
       },
-      "System.Management/10.0.0": {
+      "System.Management/10.0.11": {
         "runtime": {
           "lib/net10.0/System.Management.dll": {
-            "assemblyVersion": "10.0.0.0",
-            "fileVersion": "10.0.25.52411"
+            "assemblyVersion": "10.0.0.11",
+            "fileVersion": "10.0.1126.37416"
           }
         },
         "runtimeTargets": {
           "runtimes/win/lib/net10.0/System.Management.dll": {
             "rid": "win",
             "assetType": "runtime",
-            "assemblyVersion": "10.0.0.0",
-            "fileVersion": "10.0.25.52411"
+            "assemblyVersion": "10.0.0.11",
+            "fileVersion": "10.0.1126.37416"
           }
         }
       }
@@ -38,12 +38,12 @@
       "serviceable": false,
       "sha512": ""
     },
-    "System.Management/10.0.0": {
+    "System.Management/10.0.11": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-LE3rDZoPzulou78Tsq+3ALhUs4vatQ03v2QWbYVIenVPneUH/+LTUmHyyl098OxIFLQI6sNkZs8YHbUnT/sm3A==",
-      "path": "system.management/10.0.0",
-      "hashPath": "system.management.10.0.0.nupkg.sha512"
+      "sha512": "sha512-xyNn8KGbWI88LoUwg3rB8qcpFFST6dr8Ro/qS8GBu2GOwR0v7J82kVFHTiiPtvEKS79VbMTxs/sIKQ+Cq1Zs1g==",
+      "path": "system.management/10.0.11",
+      "hashPath": "system.management.10.0.11.nupkg.sha512"
     }
   }
 }

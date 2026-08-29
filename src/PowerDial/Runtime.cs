@@ -17,7 +17,7 @@ namespace PowerDial
     /// once there are enough recorded minutes behind it, which is why Minutes is carried
     /// alongside and shown.
     /// </summary>
-    public class RuntimeAverage
+    public sealed class RuntimeAverage
     {
         /// <summary>Recorded minutes on battery behind these figures. 0 = nothing measured.</summary>
         public int Minutes;

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PowerDial/PowerDial.csproj" />
+  </Folder>
+  <Folder Name="/src/PowerDial-selftest/">
+    <Project Path="src/PowerDial-selftest/SelfTest.csproj" />
+  </Folder>
+</Solution>

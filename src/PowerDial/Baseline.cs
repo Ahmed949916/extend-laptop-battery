@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace PowerDial
 {
-    public class BaselineEntry
+    public sealed class BaselineEntry
     {
         public string Key { get; set; }
         public int? Value { get; set; }
@@ -21,7 +21,7 @@ namespace PowerDial
         public bool AcWasExplicit { get; set; }
     }
 
-    public class BaselineFile
+    public sealed class BaselineFile
     {
         public string CapturedUtc { get; set; }
         public string Scheme { get; set; }
@@ -142,13 +142,12 @@ namespace PowerDial
         }
 
         // one instance, reused across saves
-        static readonly JsonSerializerOptions Pretty =
-            new JsonSerializerOptions { WriteIndented = true };
+        // Options now live on PrettyJson, baked in when the serialiser is generated.
 
         public static void Save(BaselineFile bf)
         {
             Directory.CreateDirectory(Folder);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(bf, Pretty));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(bf, PrettyJson.Default.BaselineFile));
         }
 
         public static BaselineFile Load()
@@ -157,7 +156,7 @@ namespace PowerDial
             {
                 if (Exists)
                 {
-                    BaselineFile bf = JsonSerializer.Deserialize<BaselineFile>(File.ReadAllText(FilePath));
+                    BaselineFile bf = JsonSerializer.Deserialize(File.ReadAllText(FilePath), PrettyJson.Default.BaselineFile);
                     if (bf != null && bf.Entries != null && bf.Entries.Count > 0) return bf;
                 }
             }

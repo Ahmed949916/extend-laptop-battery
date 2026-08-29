@@ -15,7 +15,7 @@ namespace PowerDial
     /// slider near the bottom would yank the view around. Returning the current position
     /// keeps the scrollbar fully usable while leaving the view where the user put it.
     /// </summary>
-    public class SteadyPanel : FlowLayoutPanel
+    public sealed class SteadyPanel : FlowLayoutPanel
     {
         /// <summary>
         /// Raised whenever the view has actually moved, whatever moved it.
@@ -103,7 +103,7 @@ namespace PowerDial
     }
 
     /// <summary>Flat button with hover and press states.</summary>
-    public class PillButton : Control
+    public sealed class PillButton : Control
     {
         public bool Primary;
         public bool Selected;
@@ -308,7 +308,7 @@ namespace PowerDial
     /// swallows wheel events and moves its own thumb, which silently rewrites a system
     /// setting when the user only meant to scroll the window.
     /// </summary>
-    public class Slider : Control
+    public sealed class Slider : Control
     {
         public int Minimum = 0;
         public int Maximum = 100;
@@ -428,7 +428,7 @@ namespace PowerDial
     /// own field and arrow no matter what you override, so this draws the closed state and
     /// opens a borderless popup list instead.
     /// </summary>
-    public class Picker : Control
+    public sealed class Picker : Control
     {
         readonly List<string> _items = new List<string>();
         int _index = -1;
@@ -610,7 +610,7 @@ namespace PowerDial
     /// Small circled "i". Hovering pops a panel explaining what the setting does and,
     /// where it is known, what it measured on this machine.
     /// </summary>
-    public class InfoDot : Control
+    public sealed class InfoDot : Control
     {
         public string Body = "";
         public string Heading = "";
@@ -655,7 +655,7 @@ namespace PowerDial
     }
 
     /// <summary>Borderless popup that never takes focus from the window behind it.</summary>
-    public class InfoPopup : Form
+    public sealed class InfoPopup : Form
     {
         string _head = "", _body = "";
 
@@ -724,7 +724,7 @@ namespace PowerDial
     }
 
     /// <summary>Clickable section header with a rotating chevron.</summary>
-    public class SectionToggle : Control
+    public sealed class SectionToggle : Control
     {
         public bool Expanded;
         public string Caption = "";
@@ -779,7 +779,7 @@ namespace PowerDial
     /// move over a window rather than trusting a spec, so the header shows the actual
     /// recent history instead of a lone digit.
     /// </summary>
-    public class Sparkline : Control
+    public sealed class Sparkline : Control
     {
         readonly List<double> _pts = new List<double>();
         public int Capacity = 60;

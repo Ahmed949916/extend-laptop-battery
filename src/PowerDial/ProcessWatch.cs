@@ -4,7 +4,7 @@ using System.Diagnostics;
 
 namespace PowerDial
 {
-    public class ProcInfo
+    public sealed class ProcInfo
     {
         public string Name;
         public int Instances;
@@ -24,7 +24,7 @@ namespace PowerDial
     /// Enumerating a few hundred processes costs a few milliseconds; TotalProcessorTime
     /// throws Access Denied on protected processes, which is expected and swallowed.
     /// </summary>
-    public class ProcessWatch
+    public sealed class ProcessWatch
     {
         sealed class Prev { public TimeSpan Cpu; public DateTime At; }
 

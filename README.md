@@ -22,21 +22,47 @@ presets, **Restore original settings**, or **Quit**. Only one instance runs at a
 ## Layout
 
     control-battery\
-      PowerDial.exe              the app - run this
+      PowerDial.exe             the app - run this
       PowerDial.dll             plus the .json files, System.Management.dll, runtimes\
+      PowerDial.slnx            solution: both projects
+      global.json               pins the .NET SDK
+      Directory.Build.props     build settings shared by both projects
+      Directory.Packages.props  package versions, centrally
       README.md                 this file
+      CLAUDE.md                 the working brief for changing it
       src\PowerDial\            source
       src\PowerDial-selftest\   read-only checks against the live machine
 
     Desktop\PowerDial.lnk       shortcut to the exe
+    Desktop\PowerDial.exe       the portable single-file copy, if you built one
 
-Rebuild after editing anything under `src\PowerDial`:
+## Building
+
+Needs the **.NET 10 SDK**. `global.json` pins it to 10.0.400 and rolls forward within that
+feature band, so a newer 10.0.4xx SDK is fine and a .NET 8 or 9 SDK is refused with a clear
+message rather than a strange build error.
+
+    dotnet build -c Release          from the repo root - builds both projects
+
+To rebuild the copy in this folder, publish somewhere else and copy it in:
 
     cd src\PowerDial
-    dotnet publish -c Release -o ..\..
+    dotnet publish -c Release -o %TEMP%\pd-publish
+    copy /y %TEMP%\pd-publish\* ..\..
 
-This folder is inside OneDrive, so it syncs. The `bin` and `obj` directories that appear
-under `src` when you build are throwaway - delete them if the sync noise bothers you.
+**Do not publish straight into the repo root.** `dotnet publish -o ..\..` fails with
+`CS5001: Program does not contain a static 'Main'` - the SDK excludes everything under the
+publish directory from compilation, so pointing it at the repo root hides the source from
+the compiler. Quit the running copy first or the copy fails on a locked file.
+
+To build the portable single-file copy - one 49 MB `.exe` with the runtime inside it, which
+runs on a PC with no .NET installed:
+
+    cd src\PowerDial
+    dotnet publish -c Release -r win-x64 --self-contained true -o %TEMP%\pd-portable ^
+      -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+
+The `bin` and `obj` directories under `src` are throwaway and are git-ignored.
 
 ## What it does
 
@@ -139,8 +165,9 @@ disagrees, the activity log says so and shows what it actually reads.
 **Elevation is `asInvoker`, deliberately.** Most of what this writes (EPP and the rest)
 succeeds unelevated, so demanding a UAC prompt at every launch would be gratuitous. Anything that does need admin reports it and offers **Run as admin**.
 
-**Nothing is written just by running it.** Verified: launching the app leaves every
-registry value untouched until a control is used.
+**Nothing is written just by running it.** Launching the app leaves every registry value
+untouched until a control is used. This is a design rule the restore point depends on, not
+something the selftest checks — verify it by hand if you change startup.
 
 ## Interface
 
@@ -160,7 +187,14 @@ lasts at it. The 60-second number answers "what am I drawing this minute" and sw
 several watts as the CPU breathes; the average answers "how long does this thing last".
 Both are measurements — see `Runtime.cs` — and the band says how many recorded minutes it
 is standing on, so a four-minute average cannot pass itself off as a runtime estimate.
-Below it, a bar of section buttons scrolls the column; nothing is hidden behind a tab.
+
+Under the header, also pinned, is *Where your watts go* — the processes that were busiest
+across the same window the draw figure was timed over, so the two can be read against each
+other. It is deliberately core-seconds and never watts-per-process: splitting a measured
+total by CPU share would be a made-up number, and it would point at the wrong thing, since
+whatever is holding a discrete GPU awake costs upwards of 17 W while using almost no CPU.
+
+Below both, a bar of section buttons scrolls the column; nothing is hidden behind a tab.
 
 Every interactive control is custom-drawn, because stock Win32 widgets cannot be made to
 look like this and, in the case of `TrackBar`, actively misbehave (see below).
@@ -207,6 +241,8 @@ and paint the GPU section twice.
 | `Charts.cs` | the charts and the process table |
 | `ProcessWatch.cs` | live per-process CPU and memory sampling |
 | `History.cs` | the on-disk record and the cumulative per-process tally |
+| `Json.cs` | source-generated JSON serialisers for everything persisted |
+| `Diag.cs` | where a swallowed write failure goes so the window can report it |
 | `Runtime.cs` | the measured average draw, and the runtime it implies |
 | `Theme.cs` | palette, type, drawing helpers |
 | `Widgets.cs` | Card, PillButton, Slider, Picker, InfoDot, SectionToggle, Sparkline, SteadyPanel |

@@ -22,6 +22,19 @@ the code.
 
     cd src\PowerDial-selftest && dotnet run -c Release   read-only, checks the live machine
 
+The portable copy - one self-contained .exe that runs on a PC with no .NET installed. This
+is what gets sent to someone; it is **not** rebuilt by the commands above and goes stale
+silently if you forget it:
+
+    cd src\PowerDial
+    dotnet publish -c Release -r win-x64 --self-contained true -o %TEMP%\pd-portable ^
+      -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+    copy /y %TEMP%\pd-portable\PowerDial.exe %USERPROFILE%\Desktop\
+
+**Releasing, in order.** Skipping a step here is how the runnable copy and the source end
+up disagreeing: build → run the selftest → quit the running copy → publish and copy in →
+rebuild the portable exe → launch it and look at the window.
+
 .NET 10 SDK, pinned by `global.json` to 10.0.400 with `rollForward: latestFeature`.
 `net10.0-windows`, `UseWindowsForms`. `msbuild` is not on PATH — use `dotnet build`.
 
@@ -43,6 +56,13 @@ one by one, which went stale silently every time the app gained a file. It enabl
 
 **Run the selftest after any change.** It is read-only and takes about half a minute.
 
+What it actually covers, so you know what is not protected: every knob reads back and is in
+range; the lid and sleep settings are not set to something that flattens the pack in a bag;
+the advisor scan changes nothing; every suggestion is ranked, has a legal target, has a
+button, explains itself in 80+ characters, and quotes no unmeasured saving; every profile
+references only knobs that exist; and the live battery window fills and resets. It does
+**not** touch the window, the widgets, the tray, persistence or the restore point.
+
 **Quit the running copy first** if anything writes `offenders.json`. Two processes each
 save from their own in-memory tally, so whichever writes last wins and the file can come
 out smaller than it went in.
@@ -58,6 +78,51 @@ under `$(PublishDir)`; point that at the repo root and the exclusion swallows th
 repository, `Program.cs` included, so the compiler is handed zero source files. `dotnet
 build` is unaffected because it never sets `PublishDir`. Publish to a directory outside the
 project and copy the payload in — that is what the two commands above do.
+
+## Changing things
+
+Where each kind of change goes, and the one thing about each that is easy to get wrong.
+
+**A power setting** — add a `Knob` to the array in `PowerCfg.cs`. It needs `Key` (short id
+that presets reference), `SubGroup` + `Guid` (the Windows setting), and either `Min`/`Max`
+/`Unit` for a slider or `Choices` for a picker. `Info` is required by convention - nothing
+checks it, so it is on you. Set `Basic = true` for timeouts and lid behaviour, which collapse under
+*Basic settings*; leave it false for anything that changes draw while you are using the
+machine. `PowerCfg.Exists` drops it automatically on a PC where Windows does not define it,
+so never guard it by hand.
+
+**A suggestion** — add a check to `Advisor.cs`. It must read the live value and return
+nothing when the setting is already sensible; a list that always has twelve items is one
+nobody reads. Leave `Gain` null unless you have a figure measured on this PC. Use
+`FixKind.Advisory` when there is no setting to write, which opens the relevant Windows page
+instead of pretending there is a button.
+
+**A profile** — add a `Preset` to `Presets.cs`: a name, a blurb, and a dictionary of knob
+key to battery-side value. Every key must exist in `PowerCfg`; the selftest checks that.
+
+**A tab** — the strip is built in `BuildNav`, from two parallel arrays: `names` are section
+headings registered by `Heading`/`WithInfo`, `labels` are what is drawn. A name that does
+not match a registered heading is skipped silently, so check the spelling. Every section
+stays on the one page — tabs scroll, they do not switch pages.
+
+**A persisted field** — add it to the class in `History.cs`, `Config.cs` or `Baseline.cs`,
+then make sure the type is listed in `Json.cs`. Serialisation is source-generated, so a new
+*type* needs a `[JsonSerializable]` line; a new field on a type already listed needs
+nothing. Keep the JSON short — `HistPoint` writes one line a minute forever, which is why
+its property names are `T`, `W`, `Pct`, and why `When` is `[JsonIgnore]`.
+
+**A colour or a font** — `Theme.cs`, and read the note there first. Amber is energy leaving,
+green is energy kept; `Raise` and `Hair` are neutral steps for surfaces, not accents. Do not
+add a third colour that carries meaning.
+
+**A widget** — `Widgets.cs`. It must refuse the mouse wheel (a focused `TrackBar` silently
+rewrites a system setting when someone means to scroll), and any public property on a
+`Control` needs `[DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]`
+or the build fails on WFO1000.
+
+**A build setting** — `Directory.Build.props` at the root, not the .csproj files. A package
+version goes in `Directory.Packages.props`; add packages with `dotnet add package`, never by
+editing the XML.
 
 ## Hard invariants — do not break these
 
@@ -78,7 +143,8 @@ project and copy the payload in — that is what the two commands above do.
 3. **Verify every write by reading it back.** If it disagrees, say so in the Activity log.
    Never report success you have not confirmed.
 4. **Nothing is written just by launching the app.** The restore point is captured on first
-   run and depends on this. There is a test for it.
+   run and depends on this. Nothing tests it any more - the selftest proves only that
+   *scanning* writes nothing. Check by hand if you touch startup.
 5. **Elevation is `asInvoker` on purpose.** EPP succeeds unelevated here.
    Anything needing admin reports it and offers *Run as admin*.
 
@@ -224,7 +290,8 @@ Two things follow, and both are baked into the code:
 
 - **A focused `TrackBar` swallows the mouse wheel** and moves its own thumb, silently
   rewriting a system setting when the user meant to scroll. Every control refuses the
-  wheel. Use `Slider` / `Picker`, never stock `TrackBar` / `ComboBox`. A test enforces this.
+  wheel. Use `Slider` / `Picker`, never stock `TrackBar` / `ComboBox`. Nothing enforces this
+  since the UI test was removed, so it is on review.
 - **Committing on `MouseUp` loses wheel and keyboard changes**, so the UI drifted out of
   sync with the registry (slider showed 90, registry held 80). Commits are debounced 600 ms
   after *any* value change.
@@ -241,8 +308,8 @@ Two things follow, and both are baked into the code:
 - **Docking a Fill panel next to a Top panel depends on z-order**, which is easy to get
   backwards and silently paints one over the other. The header and the scroll column use
   explicit bounds plus `Anchor` instead, so the order they are added to `Controls` decides
-  nothing about layout. It still decides `Controls[0]`, which the UI test reads as the
-  scroll column — so **`_root` must be added to the form first**.
+  nothing about layout. It still decides `Controls[0]`, which the removed UI test read as
+  the scroll column — harmless now, but keep adding **`_root` to the form first** anyway.
 - **A `FlowLayoutPanel` ignores `Anchor` on its own children.** Cards are therefore given a
   width explicitly by `Relayout`; the controls *inside* each card are anchored and follow on
   their own. Buttons are skipped — stretching *Run as admin* across the column made it look
@@ -253,9 +320,9 @@ Two things follow, and both are baked into the code:
   `Scrolled` is raised from `OnScroll`, `OnMouseWheel` and `OnPaint`, and the position
   compare makes calling it from anywhere free.
 - **`OnShown` parks the column at the top 60 ms after `Show`** so the header cannot open
-  below the fold. A test that scrolls before that timer lands gets yanked back to the top
-  mid-assertion — pump events for ~200 ms first. This is what made the section-bar checks
-  pass or fail on timing.
+  below the fold. Anything that scrolls the column programmatically within that window gets
+  yanked back to the top — wait ~200 ms first. This is what made the old UI test's
+  section-bar checks pass or fail on timing.
 - **A child control paints over its parent.** The section strip's baseline rule is drawn by
   the bar, so the tabs are two pixels shorter than it; drawn at equal height the rule hid
   behind them and showed through only in the gaps, as a row of dashes.
@@ -340,7 +407,8 @@ bar of section buttons.
   or green on decoration.
 - Settings are split by `Knob.Basic`: `false` = changes draw while in use (shown), `true` =
   timeouts and lid behaviour (collapsed under *Basic settings*).
-- Every `Knob` needs an `Info` string; a test fails if one is missing or under 80 chars.
+- Every `Knob` needs an `Info` string. Nothing enforces that - the 80-character check in the
+  selftest is on `Suggestion.Info`, not on knobs.
 
 ## Known open item
 

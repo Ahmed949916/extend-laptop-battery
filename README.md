@@ -64,6 +64,26 @@ runs on a PC with no .NET installed:
 
 The `bin` and `obj` directories under `src` are throwaway and are git-ignored.
 
+### Signing
+
+The portable copy is Authenticode-signed in place, so sign it *after* copying it out:
+
+    .\scripts\sign.ps1 "$env:USERPROFILE\Desktop\PowerDial.exe"
+
+The certificate is currently **self-signed**, which means it proves the file has not been
+altered and names a publisher, but no other machine trusts that publisher - so someone you
+send it to still gets the *"Windows protected your PC"* warning. Removing that needs a
+certificate from a CA (DigiCert, Sectigo, SSL.com and others); an OV one earns SmartScreen
+reputation over its first downloads, an EV one is trusted immediately. Since June 2023 the
+private key has to live on a hardware token or cloud HSM. When you have one, nothing in the
+build changes - pass its thumbprint:
+
+    .\scripts\sign.ps1 "$env:USERPROFILE\Desktop\PowerDial.exe" -Thumbprint <thumbprint>
+
+Verify a signed copy with `Get-AuthenticodeSignature`. While self-signed it reports
+*UnknownError - terminated in a root certificate which is not trusted*: the signature is
+good, the issuer is not trusted. That is the expected result, not a failure.
+
 ## What it does
 
 **Live readout.** Watts, time left, charge, health, and a sparkline of the recent

@@ -31,9 +31,21 @@ silently if you forget it:
       -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
     copy /y %TEMP%\pd-portable\PowerDial.exe %USERPROFILE%\Desktop\
 
+Then sign it - the file is signed in place, so sign after the copy, never before:
+
+    .\scripts\sign.ps1 "$env:USERPROFILE\Desktop\PowerDial.exe"
+
 **Releasing, in order.** Skipping a step here is how the runnable copy and the source end
 up disagreeing: build → run the selftest → quit the running copy → publish and copy in →
-rebuild the portable exe → launch it and look at the window.
+rebuild the portable exe → sign it → launch it and look at the window.
+
+**Signing does not remove the SmartScreen warning while the certificate is self-signed.**
+No other machine trusts `CN=PowerDial`, so a recipient sees exactly what they saw unsigned.
+What it does buy is tamper-evidence, a stable publisher name, and a pipeline that is one
+`-Thumbprint` away from working with a real certificate. `Get-AuthenticodeSignature`
+reporting *UnknownError - terminated in a root certificate which is not trusted* is the
+expected result here, not a failure: the signature is good, the issuer is not trusted.
+`scripts\sign.ps1` has the details and the CA options.
 
 .NET 10 SDK, pinned by `global.json` to 10.0.400 with `rollForward: latestFeature`.
 `net10.0-windows`, `UseWindowsForms`. `msbuild` is not on PATH — use `dotnet build`.

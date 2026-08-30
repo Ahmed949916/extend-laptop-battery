@@ -346,6 +346,16 @@ bar of section buttons.
   strip carries no outline, only the rule under the current tab; `Selected` on ordinary
   buttons is `Raise` plus a green border. Green is spent here deliberately, so **hover must
   not also be green**: it uses `Hair`, or hover and active look identical.
+- **The charts share one time range.** The 1h/6h/24h/7d/All buttons on *Power draw* set
+  `_rangeMin` and both charts move together — they are stacked and read against each other,
+  so showing six hours of watts beside a day of charge would invite the wrong comparison.
+  Changing range reseeds the watts chart rather than pushing to it: it is a rolling buffer
+  and has to be refilled from history.
+- **An `InfoDot` opens on hover and pins on click.** Hover alone was too brittle to be the
+  only way in — an 18px target that closed the instant the pointer drifted read as "the info
+  icons do nothing". There is a 220 ms grace period, the popup stays open while the pointer
+  is over it, and a click pins it until clicked again. **Never name a method `Hide` on a
+  `Control` subclass** — it shadows `Control.Hide()` and hides the widget itself.
 - **Section headings are a rule, a gap, then a 16px title.** The gap above is much larger
   than the gap below — that is what attaches a heading to the cards under it. As a 13px
   inline label it read as one more line of text floating between two sections.

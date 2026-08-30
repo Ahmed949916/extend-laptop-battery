@@ -617,6 +617,16 @@ namespace PowerDial
         bool _hot;
         static InfoPopup _popup;
 
+        // Hover alone was too brittle to be the only way in. The target is 18px across, and
+        // the popup used to vanish the instant the pointer left it - so a small drift on the
+        // way to reading it closed the thing you were reaching for, which reads exactly like
+        // "the info icons do nothing". Now: hovering opens it, a short grace period keeps it
+        // open while the pointer travels, moving onto the popup itself keeps it open, and a
+        // click pins it so it stays until you click again.
+        bool _pinned;
+        Timer _close;
+        static InfoDot _owner;          // whichever dot the shared popup currently belongs to
+
         public InfoDot()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
@@ -625,6 +635,51 @@ namespace PowerDial
             BackColor = Theme.Panel;
             Cursor = Cursors.Hand;
             TabStop = false;
+
+            _close = new Timer();
+            _close.Interval = 220;
+            _close.Tick += delegate { CloseIfAway(); };
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _close != null) { _close.Stop(); _close.Dispose(); _close = null; }
+            base.Dispose(disposing);
+        }
+
+        /// <summary>Pinned, or the pointer is still on the dot or over the popup? Then stay.</summary>
+        void CloseIfAway()
+        {
+            if (_pinned) { _close.Stop(); return; }
+            Point cur = Cursor.Position;
+            bool onDot = ClientRectangle.Contains(PointToClient(cur));
+            bool onPopup = _popup != null && _popup.Visible && _popup.Bounds.Contains(cur);
+            if (onDot || onPopup) return;          // keep checking until it really leaves
+            _close.Stop();
+            ClosePopup();
+        }
+
+        void Open()
+        {
+            if (_popup == null) _popup = new InfoPopup();
+            _owner = this;
+            _popup.Show(this, Heading, Body);
+            _close.Stop();
+        }
+
+        void ClosePopup()
+        {
+            _pinned = false;
+            if (_owner == this && _popup != null) _popup.Hide();
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            // A click is the reliable way in: it opens and stays open.
+            _pinned = !_pinned;
+            if (_pinned) Open(); else ClosePopup();
+            base.OnMouseDown(e);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -632,7 +687,7 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
             g.Clear(BackColor);
-            Color c = _hot ? Theme.Save : Theme.Dim;
+            Color c = (_hot || _pinned) ? Theme.Save : Theme.Dim;
             using (Pen p = new Pen(c, 1.2f)) g.DrawEllipse(p, 1, 1, Width - 3, Height - 3);
             SizeF s = g.MeasureString("i", Theme.Small);
             Theme.Str(g, "i", Theme.Small, c, (Width - s.Width) / 2f + 0.5f, (Height - s.Height) / 2f);
@@ -641,15 +696,14 @@ namespace PowerDial
         protected override void OnMouseEnter(EventArgs e)
         {
             _hot = true; Invalidate();
-            if (_popup == null) _popup = new InfoPopup();
-            _popup.Show(this, Heading, Body);
+            Open();
             base.OnMouseEnter(e);
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
             _hot = false; Invalidate();
-            if (_popup != null) _popup.Hide();
+            if (!_pinned) _close.Start();     // grace period, not an immediate close
             base.OnMouseLeave(e);
         }
     }

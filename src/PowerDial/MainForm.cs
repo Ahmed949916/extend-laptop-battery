@@ -63,6 +63,11 @@ namespace PowerDial
         List<Finding> _findings;
         bool _fixesSeeded;
         LineChart _chartWatts;
+
+        // How far back both charts look. History is one point a minute, so these are
+        // minutes; 0 means everything kept on disk.
+        int _rangeMin = 1440;
+        readonly List<PillButton> _rangeBtns = new List<PillButton>();
         BatteryChart _batChart;
         ProcessTable _procTable, _offTable;
         StackBar _barHealth;
@@ -444,22 +449,44 @@ namespace PowerDial
                 "Background means no instance of it owns a visible window. Those are the ones worth " +
                 "questioning, because you are not the one using them."));
 
-            Card ac = new Card { Width = W, Height = 318, Margin = new Padding(0, 0, 0, 10) };
+            Card ac = new Card { Width = W, Height = 352, Margin = new Padding(0, 0, 0, 10) };
             ac.Controls.Add(new Label {
                 Text = "Power draw", Location = new Point(14, 10), AutoSize = true,
                 Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+
+            // How far back to look. Both charts move together - they are stacked and read
+            // against each other, so showing six hours of watts beside a day of charge
+            // would invite exactly the wrong comparison.
+            int[] mins = { 60, 360, 1440, 10080, 0 };
+            string[] rlabels = { "1h", "6h", "24h", "7d", "All" };
+            int rx = W - 30;
+            for (int i = rlabels.Length - 1; i >= 0; i--)
+            {
+                int localMin = mins[i];
+                PillButton rb = new PillButton {
+                    Text = rlabels[i], Size = new Size(46, 24), BackColor = Theme.Panel,
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                    Selected = mins[i] == _rangeMin
+                };
+                rx -= rb.Width + 6;
+                rb.Location = new Point(rx, 8);
+                rb.Click += (s, e) => SetRange(localMin);
+                _rangeBtns.Add(rb);
+                ac.Controls.Add(rb);
+            }
+
             _chartWatts = new LineChart {
-                Location = new Point(14, 32), Size = new Size(W - 30, 118), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(14, 42), Size = new Size(W - 30, 118), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Empty = "no samples yet - readings begin after 60 seconds on battery" };
             ac.Controls.Add(_chartWatts);
             ac.Controls.Add(new Label {
-                Text = "Charge over time", Location = new Point(14, 158), AutoSize = true,
+                Text = "Charge over time", Location = new Point(14, 168), AutoSize = true,
                 Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
             _batChart = new BatteryChart {
-                Location = new Point(14, 180), Size = new Size(W - 30, 104), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+                Location = new Point(14, 190), Size = new Size(W - 30, 104), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             ac.Controls.Add(_batChart);
             _histLabel = new Label {
-                Location = new Point(14, 292), Size = new Size(W - 30, 18), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(14, 302), Size = new Size(W - 30, 34), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             ac.Controls.Add(_histLabel);
             _root.Controls.Add(ac);
@@ -1334,9 +1361,40 @@ namespace PowerDial
         }
 
         /// <summary>Reload the saved history and redraw everything that comes from it.</summary>
+        /// <summary>
+        /// Change how far back the charts look. Reseeds rather than pushing, because the
+        /// watts chart is a rolling buffer - it has to be refilled from history, not nudged.
+        /// </summary>
+        void SetRange(int minutes)
+        {
+            _rangeMin = minutes;
+            foreach (PillButton b in _rangeBtns) b.Selected = RangeOf(b.Text) == minutes;
+            foreach (PillButton b in _rangeBtns) b.Invalidate();
+            RefreshHistory(true);
+        }
+
+        static int RangeOf(string label)
+        {
+            if (label == "1h") return 60;
+            if (label == "6h") return 360;
+            if (label == "24h") return 1440;
+            if (label == "7d") return 10080;
+            return 0;
+        }
+
+        string RangeWord()
+        {
+            if (_rangeMin == 60) return "the last hour";
+            if (_rangeMin == 360) return "the last 6 hours";
+            if (_rangeMin == 1440) return "the last 24 hours";
+            if (_rangeMin == 10080) return "the last 7 days";
+            return "everything recorded";
+        }
+
         void RefreshHistory(bool seedChart)
         {
-            List<HistPoint> pts = History.Recent(1440);      // about a day at one a minute
+            // 0 means everything kept on disk - three months at one point a minute.
+            List<HistPoint> pts = History.Recent(_rangeMin > 0 ? _rangeMin : 200000);
             _batChart.SetData(pts);
 
             if (seedChart)
@@ -1352,7 +1410,7 @@ namespace PowerDial
             PushAverage();
 
             History.Stats st = History.Summarise(pts);
-            string line = st.Points + " minutes recorded";
+            string line = "Showing " + RangeWord() + "   ·   " + st.Points + " minutes recorded";
             if (st.BatteryPoints > 0)
                 line += "   ·   " + FmtHours(st.BatteryMinutes / 60.0) + " of it on battery, averaging " +
                         st.AvgWatts.ToString("0.00") + " W (" + st.MinWatts.ToString("0.00") + " to " +

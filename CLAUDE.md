@@ -126,6 +126,50 @@ or the build fails on WFO1000.
 version goes in `Directory.Packages.props`; add packages with `dotnet add package`, never by
 editing the XML.
 
+## Two modes
+
+`Config.Mode` is `basic` (the default) or `advanced`, remembered across launches.
+
+**Basic** is one card: three named modes (*More battery* / *Normal* / *More performance*),
+a button that applies everything the advisor can write, an Undo, what the last change was
+*measured* to be worth, and a table of what each mode has actually cost. Everything else in
+the column is hidden, along with the watts strip and the section bar. It is for someone who
+wants a laptop that lasts longer, not a registry editor.
+
+The three modes **are** the existing profiles - `Preset.Friendly` names them - so there is
+one definition of what each means and Advanced shows the same settings underneath.
+`Preset.Code` is a stable id written into every history point as `HistPoint.M`; **never
+renumber those**, old history on disk refers to them.
+
+**Advanced** is the whole instrument, exactly as before.
+
+Three rules:
+
+1. **The saving is measured, never modelled.** `Config.BeforeWatts` is the recorded average
+   at the moment Optimise ran; the "after" is `RuntimeAverage` over the points since
+   `Config.OptimisedAtUnix`. Both sides come from this machine. Under ten recorded minutes
+   afterwards it says it is still measuring rather than showing a figure.
+2. **Sections are hidden, not unbuilt.** `TagSections` walks the column once after it is
+   built and labels every control with the heading above it; `ApplyMode` flips `Visible` by
+   tag. Switching modes is instant and nothing is reconstructed — but a new card added to
+   `_root` is tagged automatically only because it is added *after* its heading, so keep
+   construction in section order.
+3. **Basic must degrade.** No battery means no promise about battery life: `RefreshBasic`
+   says so and hides the buttons and the table rather than showing blanks.
+4. **The mode is read from the machine, never assumed.** `Presets.Match()` compares the live
+   battery-side values against each profile, so a setting changed in Windows or by a vendor
+   tool is reflected. Knobs this PC does not define are skipped rather than counted as a
+   mismatch. It is a registry read per knob per profile, so call it after a write - never on
+   the poll. When the match is a profile Basic does not offer, or no profile at all, the
+   *Right now* line says which - three unlit buttons would otherwise read as "nothing set".
+5. **Per-mode cost is grouped measurement, not a benchmark.** `ModeStats` buckets recorded
+   points by `HistPoint.M` and runs the same `RuntimeAverage` over each. A mode with under
+   five recorded minutes says *not measured yet*. The bars scale against the thirstiest
+   measured mode, so nothing implies a share of a total.
+6. **`ApplyMode` runs at the end of `BuildUi`, before the first battery poll and before
+   history is read.** Anything the Basic card shows must therefore be refreshed again after
+   startup finishes, or it sits on empty values until the first poll fifteen seconds later.
+
 ## Hard invariants — do not break these
 
 1. **The DC (on-battery) side is the default, and the only side anything writes by

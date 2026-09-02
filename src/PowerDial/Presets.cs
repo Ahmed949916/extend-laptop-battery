@@ -7,6 +7,16 @@ namespace PowerDial
         public string Name;
         public string Blurb;
         public Dictionary<string, int> Values;         // knob key -> battery-side value
+
+        /// <summary>
+        /// Stable id written into every history point, so recorded draw can be grouped by
+        /// the profile that was actually in effect when it was measured. Never renumber
+        /// these - old history on disk refers to them. 0 means "not one of these".
+        /// </summary>
+        public int Code;
+
+        /// <summary>Plain-language name for Basic mode. Null = not offered there.</summary>
+        public string Friendly;
     }
 
     /// <summary>
@@ -32,7 +42,7 @@ namespace PowerDial
         public static readonly List<Preset> All = new List<Preset>
         {
             new Preset {
-                Name = "Longest",
+                Name = "Longest", Code = 1,
                 Blurb = "Everything traded for runtime. Boost off, dimmest screen, sleeps quickly.",
                 Values = new Dictionary<string, int> {
                     { "epp", 100 },        // all efficiency, no chasing clocks at all
@@ -48,7 +58,7 @@ namespace PowerDial
                 }
             },
             new Preset {
-                Name = "Endurance",
+                Name = "Endurance", Code = 2, Friendly = "More battery",
                 Blurb = "Every last minute. Boost locked out, dim screen, quick sleep.",
                 Values = new Dictionary<string, int> {
                     { "epp", 90 },
@@ -63,7 +73,7 @@ namespace PowerDial
                 }
             },
             new Preset {
-                Name = "Balanced",
+                Name = "Balanced", Code = 3, Friendly = "Normal",
                 Blurb = "The sensible default. Efficient without feeling slow.",
                 Values = new Dictionary<string, int> {
                     { "epp", 80 },
@@ -78,7 +88,7 @@ namespace PowerDial
                 }
             },
             new Preset {
-                Name = "Full speed",
+                Name = "Full speed", Code = 4, Friendly = "More performance",
                 Blurb = "Unrestricted CPU while on battery. Expect much shorter runtime.",
                 Values = new Dictionary<string, int> {
                     { "epp", 50 },
@@ -93,6 +103,50 @@ namespace PowerDial
                 }
             },
         };
+
+        /// <summary>
+        /// Which profile the battery side currently matches exactly, or null for a custom
+        /// mix. Knobs Windows does not define on this PC are skipped rather than counted as
+        /// a mismatch, so a machine missing one setting can still match a profile.
+        ///
+        /// This reads the machine rather than trusting whatever the app last wrote: the
+        /// settings can be changed in Windows, by a vendor tool, or by another profile, and
+        /// history is only worth grouping by mode if the mode recorded is the real one.
+        /// </summary>
+        public static Preset Match()
+        {
+            foreach (Preset p in All)
+            {
+                bool all = true;
+                foreach (KeyValuePair<string, int> kv in p.Values)
+                {
+                    Knob k = PowerCfg.Find(kv.Key);
+                    if (k == null) continue;
+                    int? v = PowerCfg.Read(k, true);
+                    if (!v.HasValue || v.Value != kv.Value) { all = false; break; }
+                }
+                if (all) return p;
+            }
+            return null;
+        }
+
+        public static Preset ByCode(int code)
+        {
+            foreach (Preset p in All) if (p.Code == code) return p;
+            return null;
+        }
+
+        /// <summary>The three offered in Basic mode, in order, least power first.</summary>
+        public static List<Preset> Basic
+        {
+            get
+            {
+                List<Preset> outp = new List<Preset>();
+                foreach (Preset p in All) if (p.Friendly != null) outp.Add(p);
+                return outp;
+            }
+        }
+
 
         public static Preset Find(string name)
         {

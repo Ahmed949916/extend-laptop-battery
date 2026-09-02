@@ -39,6 +39,15 @@ namespace PowerDial
         SteadyPanel _root;
         Panel _chrome;              // header + watts strip + section bar, pinned above the scroll
         Card _wattsStrip;           // "Where your watts go", pinned so it never scrolls away
+        Card _basicCard;            // the whole of Basic mode
+        PillButton _btnBasic, _btnAdvanced, _btnOptimise;
+        Label _basicState, _basicSaved, _basicStats, _basicNow;
+        Panel _modeTable;                              // measured cost of each mode
+        readonly List<PillButton> _modeBtns = new List<PillButton>();
+
+        /// <summary>Preset.Code of the profile the machine currently matches, 0 for custom.
+        /// Read from the machine after any change, and written into every history point.</summary>
+        int _modeCode;
         Label _wattsTotal;          // the measured figure the list is describing
         Panel _navBar;
         readonly List<PillButton> _navBtns = new List<PillButton>();
@@ -193,6 +202,11 @@ namespace PowerDial
             RefreshFixes();
             RefreshProcesses();
             RefreshHistory(true);
+            // BuildUi applies the saved mode before any of this has run, so the Basic card
+            // is first drawn with no battery reading and no history. Fill it in now rather
+            // than leaving it saying "not measured yet" until the first poll fifteen
+            // seconds later - the data is already here.
+            RefreshBasic();
             if (pruned > 0) Log("Cleared " + pruned + " history file(s) older than " + History.KeepMonths + " months.");
 
             Log("Watching " + PowerCfg.ActiveSchemeName() +
@@ -282,6 +296,7 @@ namespace PowerDial
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _readout.Controls.Add(_spark);
+            _readout.Top = 38;                 // under the Basic / Advanced switch
             _chrome.Controls.Add(_readout);
 
             // ---------------------------------------------------------- suggestions
@@ -683,11 +698,81 @@ namespace PowerDial
             });
 
             // built last: every section has to exist before the bar can point at them
+            BuildModeSwitch();
+            BuildBasicCard();
+            TagSections();
             BuildWattsStrip();
             BuildNav();
             // Scrolled covers the wheel as well as the scrollbar - the stock Scroll event
             // does not, so the strip used to go stale the moment anyone spun the wheel
             _root.Scrolled += (s, e) => MarkNav();
+
+            // Everything exists now, so the saved mode can decide what is on screen.
+            ApplyMode();
+        }
+
+        /// <summary>
+        /// Label every control in the column with the section it belongs to.
+        ///
+        /// The column is one flat flow of cards - nothing groups a card with the heading
+        /// above it. Rather than change every construction site to say which section it is
+        /// in, this walks the column once after it is built: a heading starts a section, and
+        /// everything after it belongs to that section until the next one. Basic mode then
+        /// shows or hides whole sections by tag.
+        /// </summary>
+        void TagSections()
+        {
+            string current = null;
+            foreach (Control c in _root.Controls)
+            {
+                foreach (KeyValuePair<string, Control> kv in _sections)
+                    if (kv.Value == c) { current = kv.Key; break; }
+                c.Tag = current;
+            }
+        }
+
+        /// <summary>
+        /// Show only what the chosen mode needs.
+        ///
+        /// Basic is one card: a button that does the sensible thing, and what it was worth.
+        /// Advanced is the whole instrument. Sections are hidden rather than unbuilt, so
+        /// switching back is instant and nothing has to be reconstructed.
+        /// </summary>
+        void ApplyMode()
+        {
+            bool basic = Config.IsBasic;
+
+            _btnBasic.Selected = basic;
+            _btnAdvanced.Selected = !basic;
+            _btnBasic.Invalidate(); _btnAdvanced.Invalidate();
+
+            foreach (Control c in _root.Controls)
+            {
+                if (c == _basicCard) { c.Visible = basic; continue; }
+                c.Visible = !basic;
+            }
+
+            // The watts strip and the section bar are the advanced instrument; in basic mode
+            // the header alone carries the numbers, and the chrome shrinks to match.
+            _wattsStrip.Visible = !basic;
+            _navBar.Visible = !basic;
+            _navBar.Location = new Point(_navBar.Left, basic ? _readout.Bottom + 10 : _wattsStrip.Bottom + 10);
+            _chrome.Height = (basic ? _readout.Bottom : _navBar.Bottom) + 10;
+
+            _root.Location = new Point(0, _chrome.Height);
+            _root.Size = new Size(ClientSize.Width, Math.Max(80, ClientSize.Height - _chrome.Height));
+
+            if (basic) RefreshBasic();
+            Relayout();
+        }
+
+        void SetMode(string mode)
+        {
+            Config.SetMode(mode);
+            ApplyMode();
+            Log(Config.IsBasic
+                ? "Switched to Basic - one button, and what it was worth."
+                : "Switched to Advanced - every setting and every measurement.");
         }
 
         /// <summary>
@@ -706,6 +791,403 @@ namespace PowerDial
         /// the measured total moved up onto the title row, the explanation is one line
         /// rather than two, and it lists four processes rather than five.
         /// </summary>
+        /// <summary>
+        /// Basic mode, entire. One button that does the sensible thing, a plain-language
+        /// account of what the machine is doing, and - once it has been measured - what the
+        /// last optimise was actually worth.
+        ///
+        /// Nothing here is a prediction. The saving is the average draw recorded before the
+        /// change against the average recorded since, both measured on this PC; until enough
+        /// minutes have accumulated afterwards it says so rather than showing a number.
+        /// </summary>
+        /// <summary>
+        /// Basic / Advanced. Basic is the default because someone opening this for the first
+        /// time wants a longer-lasting laptop, not a registry editor; Advanced is the whole
+        /// instrument and is one click away. The choice is remembered.
+        /// </summary>
+        void BuildModeSwitch()
+        {
+            _btnBasic = new PillButton {
+                Text = "Basic", Tab = true, Size = new Size(74, 26), BackColor = Theme.Ink,
+                Location = new Point(Chrome, 6)
+            };
+            _btnBasic.Click += (s, e) => SetMode("basic");
+            _chrome.Controls.Add(_btnBasic);
+
+            _btnAdvanced = new PillButton {
+                Text = "Advanced", Tab = true, Size = new Size(100, 26), BackColor = Theme.Ink,
+                Location = new Point(Chrome + 78, 6)
+            };
+            _btnAdvanced.Click += (s, e) => SetMode("advanced");
+            _chrome.Controls.Add(_btnAdvanced);
+        }
+
+        void BuildBasicCard()
+        {
+            _basicCard = new Card { Width = W, Height = 446, Margin = new Padding(0, 0, 0, 10) };
+
+            _basicCard.Controls.Add(new Label {
+                Text = "Make this battery last longer", Location = new Point(18, 12), AutoSize = true,
+                Font = Theme.Head, ForeColor = Theme.Text, BackColor = Theme.Panel });
+
+            _basicState = new Label {
+                Location = new Point(18, 262), Size = new Size(W - 40, 34),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Body, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            _basicCard.Controls.Add(_basicState);
+
+            _btnOptimise = new PillButton {
+                Text = "Optimise my battery", Glyph = Theme.GlyphCheck,
+                Location = new Point(18, 40), Size = new Size(230, 36),
+                Primary = true, BackColor = Theme.Panel };
+            _btnOptimise.Click += (s, e) => OptimiseBasic();
+            _basicCard.Controls.Add(_btnOptimise);
+
+            PillButton undo = new PillButton {
+                Text = "Undo", Glyph = Theme.GlyphUndo,
+                Location = new Point(258, 40), Size = new Size(110, 36), BackColor = Theme.Panel };
+            undo.Click += (s, e) => RestoreBaseline();
+            _basicCard.Controls.Add(undo);
+
+            _basicNow = new Label {
+                Location = new Point(18, 84), Size = new Size(W - 40, 18),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            _basicCard.Controls.Add(_basicNow);
+
+            // Three named modes rather than ten sliders. They are the existing profiles, so
+            // there is one definition of what each one means, and Advanced shows the same
+            // settings underneath.
+            int mx = 18;
+            foreach (Preset pr in Presets.Basic)
+            {
+                Preset local = pr;
+                PillButton mb = new PillButton {
+                    Text = pr.Friendly, Location = new Point(mx, 106), Size = new Size(168, 40),
+                    BackColor = Theme.Panel
+                };
+                mb.Click += (s, e) => PickMode(local);
+                _modeBtns.Add(mb);
+                _basicCard.Controls.Add(mb);
+                mx += 176;
+            }
+
+            _basicCard.Controls.Add(new Label {
+                Text = "What each mode has actually cost you", Location = new Point(18, 158),
+                AutoSize = true, Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+
+            _modeTable = new Panel {
+                Location = new Point(18, 182), Size = new Size(W - 40, 74), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+            _modeTable.Paint += (s, e) => PaintModeTable(e.Graphics);
+            _basicCard.Controls.Add(_modeTable);
+
+            _basicSaved = new Label {
+                Location = new Point(18, 300), Size = new Size(W - 40, 52),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Body, ForeColor = Theme.Text, BackColor = Theme.Panel };
+            _basicCard.Controls.Add(_basicSaved);
+
+            _basicStats = new Label {
+                Location = new Point(18, 356), Size = new Size(W - 40, 80),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
+            _basicCard.Controls.Add(_basicStats);
+
+            _root.Controls.Add(_basicCard);
+            _root.Controls.SetChildIndex(_basicCard, 0);      // first thing in the column
+        }
+
+        /// <summary>
+        /// Apply one of the three named modes. The same code path as a profile in Advanced,
+        /// because they are the same profiles - one definition of what each mode means.
+        /// </summary>
+        void PickMode(Preset p)
+        {
+            PillButton btn = null;
+            foreach (PillButton b in _modeBtns) if (b.Text == p.Friendly) btn = b;
+
+            // Note what it was drawing first, so the change can be compared against it.
+            if (_avg.Known)
+                Config.MarkOptimised(_avg.Watts, _avg.Minutes, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+            BeginBusy(btn, p.Values.Count + 1);
+            int ok = 0, fail = 0;
+            foreach (KeyValuePair<string, int> kv in p.Values)
+            {
+                Knob k = PowerCfg.Find(kv.Key);
+                if (k == null) continue;
+                BusyStep();
+                string err = PowerCfg.WriteDc(k, kv.Value);
+                if (err != null) { Log("   could not set " + k.Label + ": " + err); fail++; continue; }
+                int? back = PowerCfg.Read(k, true);
+                if (back.HasValue && back.Value == kv.Value) ok++; else { Log("   " + k.Label + " did not stick"); fail++; }
+            }
+            Log(p.Friendly + ": " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
+            ResetDrawWindow();
+            BusyStep();
+            LoadValues(); RefreshWatch(); RefreshFixes();
+            EndBusy();
+            RefreshBasic();
+        }
+
+        /// <summary>
+        /// Read back which profile the machine now matches. Called after anything that
+        /// writes a setting, never on the poll - it is a registry read per knob per profile.
+        /// </summary>
+        void RefreshModeCode()
+        {
+            Preset m = Presets.Match();
+            _modeCode = m == null ? 0 : m.Code;
+            foreach (PillButton b in _modeBtns)
+            {
+                bool on = m != null && b.Text == m.Friendly;
+                if (b.Selected != on) { b.Selected = on; b.Invalidate(); }
+            }
+
+            if (_basicNow != null)
+            {
+                if (m == null)
+                    _basicNow.Text = "Right now: a custom mix of settings. Pick one below to make it a known mode.";
+                else if (m.Friendly != null)
+                    _basicNow.Text = "Right now: " + m.Friendly + " - " + m.Blurb;
+                else
+                    _basicNow.Text = "Right now: " + m.Name + ", an Advanced profile. " + m.Blurb;
+            }
+        }
+
+        /// <summary>One mode's measured record: how long it ran, and what it drew.</summary>
+        sealed class ModeStat
+        {
+            public string Name;
+            public int Minutes;
+            public double Watts;
+            public double? Hours;
+        }
+
+        /// <summary>
+        /// What each mode actually cost, measured. Points are grouped by the profile that
+        /// was in effect when they were recorded, and only points taken on battery while
+        /// actually drawing count - the same filter the header average uses.
+        ///
+        /// This is the honest version of "which mode is better": it compares what this
+        /// laptop really drew in each, over stated amounts of time, rather than predicting
+        /// anything. A mode with too little recorded says so.
+        /// </summary>
+        List<ModeStat> ModeStats()
+        {
+            List<HistPoint> all = History.Recent(200000);
+            List<ModeStat> outp = new List<ModeStat>();
+
+            foreach (Preset p in Presets.Basic)
+            {
+                List<HistPoint> mine = new List<HistPoint>();
+                foreach (HistPoint h in all) if (h.M == p.Code) mine.Add(h);
+
+                RuntimeAverage r = RuntimeAverage.From(mine);
+                ModeStat st = new ModeStat();
+                st.Name = p.Friendly;
+                st.Minutes = r.Minutes;
+                st.Watts = r.Watts;
+                st.Hours = r.Known ? r.FromFull(_bat.FullChargeMwh) : null;
+                outp.Add(st);
+            }
+            return outp;
+        }
+
+        /// <summary>
+        /// The comparison table. Bars are scaled against the thirstiest measured mode, so
+        /// the shape says "this one costs more" without implying a share of anything.
+        /// </summary>
+        void PaintModeTable(Graphics g)
+        {
+            Theme.Quality(g);
+            g.Clear(Theme.Panel);
+
+            List<ModeStat> stats = ModeStats();
+            double max = 0;
+            int measured = 0;
+            foreach (ModeStat st in stats) { if (st.Minutes > 0) { measured++; if (st.Watts > max) max = st.Watts; } }
+            if (max <= 0) max = 1;
+
+            if (measured == 0)
+            {
+                Theme.Str(g, "Nothing measured yet. Pick a mode and use the laptop on battery for a while - " +
+                             "this fills in as it goes.", Theme.Small, Theme.Dim, 0, 4);
+                return;
+            }
+
+            const int NameW = 150;
+            const int FigW = 200;
+            int barMax = Math.Max(20, _modeTable.Width - NameW - FigW - 12);
+            int y = 0;
+            foreach (ModeStat st in stats)
+            {
+                Theme.Str(g, st.Name, Theme.Body, Theme.Text, 0, y);
+
+                if (st.Minutes < 5)
+                {
+                    Theme.Str(g, "not measured yet", Theme.Small, Theme.Dim, NameW, y + 2);
+                    y += 24;
+                    continue;
+                }
+
+                Theme.FillRound(g, new Rectangle(NameW, y + 5, barMax, 9), 3, Theme.Inset);
+                int w = (int)Math.Round(st.Watts / max * barMax);
+                if (w < 2) w = 2;
+                Theme.FillRound(g, new Rectangle(NameW, y + 5, w, 9), 3, Theme.Spend);
+
+                string fig = st.Watts.ToString("0.0") + " W";
+                if (st.Hours.HasValue) fig += "   " + FmtHours(st.Hours.Value) + " a charge";
+                fig += "   (" + st.Minutes + " min)";
+                Theme.StrRight(g, fig, Theme.Small, Theme.Dim, _modeTable.Width, y + 2);
+                y += 24;
+            }
+        }
+
+        /// <summary>Plain language, measured numbers, and no figure it has not earned.</summary>
+        void RefreshBasic()
+        {
+            if (_basicCard == null) return;
+
+            // A desktop is a supported target. It still has power settings worth changing,
+            // but "make this battery last longer" is the wrong promise to make to it.
+            if (!Machine.HasBattery)
+            {
+                _basicState.Text = "This PC has no battery, so there is nothing to make last longer. " +
+                                   "Advanced mode still has the power settings, the process list and the history.";
+                _btnOptimise.Visible = false;
+                foreach (PillButton b in _modeBtns) b.Visible = false;
+                _modeTable.Visible = false;
+                _basicSaved.Text = "";
+                _basicStats.Text = Machine.Summary();
+                return;
+            }
+            _btnOptimise.Visible = true;
+            foreach (PillButton b in _modeBtns) b.Visible = true;
+            _modeTable.Visible = true;
+
+            int fixable = 0;
+            foreach (Suggestion g in _fixes) if (g.Kind != FixKind.Advisory) fixable++;
+
+            _basicState.Text = fixable == 0
+                ? "Everything this app can set is already set for long battery life."
+                : fixable + (fixable == 1 ? " setting is" : " settings are") +
+                  " costing you battery life. One click changes them all - only for when you " +
+                  "are on battery, and Undo puts them back.";
+            _btnOptimise.Text = fixable == 0 ? "Check again" : "Optimise my battery";
+
+            _basicSaved.Text = SavedText();
+            if (_modeTable != null) _modeTable.Invalidate();
+
+            string left = "Battery time left: not measured yet";
+            double? hrs = _avg.Left(_bat.RemainingMwh);
+            if (_bat.OnAc) left = "Plugged in - battery readings pause while charging";
+            else if (hrs.HasValue) left = "About " + FmtHours(hrs.Value) + " left at your usual usage";
+
+            string health = "Battery health: not known on this PC";
+            if (_bat.FullChargeMwh.HasValue && Config.EffectiveDesignMwh > 0)
+            {
+                double pct = 100.0 * _bat.FullChargeMwh.Value / Config.EffectiveDesignMwh;
+                health = "Battery health: holds about " + pct.ToString("0") + "% of what it did when new";
+            }
+
+            string avg = _avg.Known
+                ? "Measured over " + _avg.Minutes + " recorded minutes on battery, averaging " +
+                  _avg.Watts.ToString("0.0") + " W"
+                : "Still measuring what this laptop draws - leave it running on battery for a while";
+
+            _basicStats.Text = left + "\n" + health + "\n" + avg;
+        }
+
+        /// <summary>
+        /// What the last optimise was worth, or an honest reason there is no figure yet.
+        /// Both averages are measured here; nothing is modelled.
+        /// </summary>
+        string SavedText()
+        {
+            Config c = Config.Current;
+            if (!c.BeforeWatts.HasValue || c.OptimisedAtUnix <= 0)
+                return "Once you optimise, this will show what it actually saved - measured on " +
+                       "this laptop, not estimated.";
+
+            List<HistPoint> since = new List<HistPoint>();
+            foreach (HistPoint p in History.Recent(200000))
+                if (p.T >= c.OptimisedAtUnix) since.Add(p);
+
+            RuntimeAverage after = RuntimeAverage.From(since);
+            if (!after.Known || after.Minutes < 10)
+                return "Measuring what that change was worth. It needs about " +
+                       Math.Max(1, 10 - after.Minutes) + " more minutes on battery before it can say.";
+
+            double before = c.BeforeWatts.Value;
+            double delta = before - after.Watts;
+            string head = "Before: " + before.ToString("0.0") + " W   -   now: " + after.Watts.ToString("0.0") +
+                          " W   -   measured over " + after.Minutes + " minutes since.";
+
+            if (Math.Abs(delta) < 0.15) return head + "\nNo measurable difference yet.";
+
+            RuntimeAverage was = new RuntimeAverage();
+            was.Watts = before;
+            was.Minutes = c.BeforeMinutes;
+            double? fullBefore = was.FromFull(_bat.FullChargeMwh);
+            double? fullAfter = after.FromFull(_bat.FullChargeMwh);
+
+            string tail;
+            if (fullBefore.HasValue && fullAfter.HasValue)
+                tail = delta > 0
+                    ? "That is about " + FmtHours(fullAfter.Value - fullBefore.Value) + " more from a full charge."
+                    : "That is about " + FmtHours(fullBefore.Value - fullAfter.Value) + " less from a full charge - " +
+                      "you have probably been working the machine harder since.";
+            else
+                tail = delta > 0 ? "Drawing less than before." : "Drawing more than before.";
+            return head + "\n" + tail;
+        }
+
+        /// <summary>
+        /// The one button. Applies everything the advisor can write, after noting what the
+        /// machine was drawing so the result can be compared against it.
+        /// </summary>
+        void OptimiseBasic()
+        {
+            List<Suggestion> doable = new List<Suggestion>();
+            foreach (Suggestion g in _fixes) if (g.Kind != FixKind.Advisory) doable.Add(g);
+
+            if (doable.Count == 0)
+            {
+                RunBusy(_btnOptimise, delegate { LoadValues(); RefreshWatch(); RefreshFixes(); });
+                Log("Re-checked: nothing left that this app can set.");
+                RefreshBasic();
+                return;
+            }
+
+            if (MessageBox.Show(
+                    "Change " + doable.Count + " setting(s) so this laptop lasts longer on battery?\n\n" +
+                    "Your plugged-in settings are not touched, and Undo puts everything back.",
+                    "Optimise my battery", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+                return;
+
+            // Note what it was drawing first - this is the only "before" that can ever exist.
+            if (_avg.Known)
+                Config.MarkOptimised(_avg.Watts, _avg.Minutes, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+            BeginBusy(_btnOptimise, doable.Count + 1);
+            int ok = 0, fail = 0;
+            foreach (Suggestion g in doable)
+            {
+                BusyStep();
+                string err = Advisor.Apply(g);
+                if (err != null) { Log("   " + g.Title + ": " + err); fail++; }
+                else { Log("   " + g.Title + " -> " + g.ThenText); ok++; }
+            }
+            Log("Optimised: " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
+            ResetDrawWindow();
+            BusyStep();
+            LoadValues(); RefreshWatch(); RefreshFixes();
+            EndBusy();
+            RefreshBasic();
+        }
+
         void BuildWattsStrip()
         {
             _wattsStrip = new Card {
@@ -744,8 +1226,9 @@ namespace PowerDial
                        "from a minute ago and whatever happens to be busy this instant.\n\n" +
                        "These are core-seconds, not watts, and that is deliberate. Splitting the measured " +
                        "total across processes by CPU share would be a fabricated number, and it would " +
-                       "point at the wrong culprit: anything holding a discrete GPU awake costs upwards of " +
-                       "17 W while reporting almost no CPU at all. Use this to see what was working, then " +
+                       "point at the wrong culprit: anything holding a discrete GPU awake can cost more than " +
+                       "everything on this list put together while reporting almost no CPU at all. Use this " +
+                       "to see what was working, then " +
                        "A/B the draw itself to find out what a change is really worth.\n\n" +
                        "bg marks a process with no window of its own - the ones that are easy to miss.\n\n" +
                        "The list empties when a setting changes, because the measurement window restarts."
@@ -918,6 +1401,12 @@ namespace PowerDial
             _wattsStrip.Width = w;
             _navBar.Width = w;
             _readout.Left = Chrome + extra / 2;
+            if (_btnBasic != null)
+            {
+                _btnBasic.Left = _readout.Left;
+                _btnAdvanced.Left = _readout.Left + 78;
+            }
+            if (_basicCard != null) _basicCard.Width = w;
             _wattsStrip.Left = _readout.Left;
             _navBar.Left = _readout.Left;
 
@@ -1325,6 +1814,10 @@ namespace PowerDial
 
             }
             finally { _loading = false; }
+
+            // Which profile the machine now matches, read back from the machine itself.
+            // Every history point written from here on carries it.
+            RefreshModeCode();
         }
 
 
@@ -1457,6 +1950,7 @@ namespace PowerDial
                 Ac = _bat.OnAc,
                 Cpu = Math.Round(ProcessWatch.TotalCpu(_procs, false), 1),
                 BgMb = Math.Round(ProcessWatch.TotalMb(_procs, true), 0),
+                M = _modeCode,
                 Top = TopSummary()
             };
             History.Append(p, _procs, interval);
@@ -1472,6 +1966,7 @@ namespace PowerDial
 
             if (draining) _chartWatts.Push(p.W);
             RefreshHistory(false);
+            if (Config.IsBasic) RefreshBasic();
         }
 
         string TopSummary()

@@ -26,6 +26,17 @@ namespace PowerDial
         /// <summary>Seconds per draw measurement window.</summary>
         public int WindowSeconds { get; set; }
 
+        /// <summary>"basic" or "advanced". Basic is the default: someone opening this for the
+        /// first time wants their battery to last longer, not a registry editor.</summary>
+        public string Mode { get; set; }
+
+        // What the machine was drawing before the last optimise, so the app can say what the
+        // change was actually worth. Both sides are measured on this PC - nothing here is a
+        // prediction, and until enough minutes have been recorded afterwards it says so.
+        public double? BeforeWatts { get; set; }
+        public int BeforeMinutes { get; set; }
+        public long OptimisedAtUnix { get; set; }
+
         static Config _current;
         static readonly System.Threading.Lock Gate = new System.Threading.Lock();
 
@@ -87,6 +98,23 @@ namespace PowerDial
                 return Machine.DesignCapacityMwh;
             }
         }
+
+        /// <summary>Remember what the pack was drawing before an optimise, to compare against.</summary>
+        public static void MarkOptimised(double? beforeWatts, int beforeMinutes, long nowUnix)
+        {
+            Current.BeforeWatts = beforeWatts;
+            Current.BeforeMinutes = beforeMinutes;
+            Current.OptimisedAtUnix = nowUnix;
+            Save();
+        }
+
+        public static void SetMode(string mode)
+        {
+            Current.Mode = mode == "advanced" ? "advanced" : "basic";
+            Save();
+        }
+
+        public static bool IsBasic { get { return Current.Mode != "advanced"; } }
 
         public static void SetGpuWake(double watts)
         {

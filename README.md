@@ -19,6 +19,27 @@ Double-click **PowerDial** on the Desktop, or run `PowerDial.exe` in this folder
 Closing the window hides it to the notification area. Right-click the tray icon for the
 presets, **Restore original settings**, or **Quit**. Only one instance runs at a time.
 
+## Two modes
+
+**Basic** is what opens the first time. One card:
+
+- **Three modes** — *More battery*, *Normal*, *More performance*. One click each, battery
+  side only, and it says which one is in effect right now.
+- **What is costing you battery life**, and a button that fixes it. Undo puts it all back.
+- **What each mode has actually cost you** — the measured average draw recorded while that
+  mode was in effect, and what it works out to per charge. This is the useful part and it
+  fills in as you use the laptop: pick a mode, use it for a while, pick another, and after
+  a few sessions you have a real comparison from your own machine rather than a claim from
+  a review site. A mode with too little recorded says *not measured yet* rather than
+  showing a number it has not earned.
+- **What the last change was worth**, in watts and in extra hours per charge.
+
+Every figure there is measured on your machine. Nothing is predicted, and where there is
+not enough data yet it says so instead of guessing.
+
+**Advanced** is the full instrument: every power setting, the suggestions list, the charts,
+the process telemetry and the GPU watch. Switch at the top of the window; it is remembered.
+
 ## Layout
 
     control-battery\

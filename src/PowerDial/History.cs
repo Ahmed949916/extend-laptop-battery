@@ -20,6 +20,11 @@ namespace PowerDial
 
         // derived, not stored - System.Text.Json serialises get-only properties by
         // default, which was writing a redundant ISO timestamp on every line
+        /// <summary>Which profile was in effect, as Preset.Code. 0 = a custom mix.
+        /// One extra small number a minute, and it is what makes "what does each mode
+        /// actually cost" answerable from measurement instead of guesswork.</summary>
+        public int M { get; set; }
+
         [JsonIgnore]
         public DateTime When { get { return DateTimeOffset.FromUnixTimeSeconds(T).LocalDateTime; } }
     }

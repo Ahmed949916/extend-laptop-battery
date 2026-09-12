@@ -29,7 +29,6 @@ namespace PowerDial
         sealed class Prev { public TimeSpan Cpu; public DateTime At; }
 
         readonly Dictionary<string, Prev> _prev = new Dictionary<string, Prev>();
-        readonly int _cores = Math.Max(1, Environment.ProcessorCount);
         int _selfId;
 
         public string LastError { get; private set; }

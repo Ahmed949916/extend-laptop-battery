@@ -43,6 +43,7 @@ namespace PowerDial
         PillButton _btnBasic, _btnAdvanced, _btnOptimise;
         Label _basicState, _basicSaved, _basicStats, _basicNow;
         Panel _modeTable;                              // measured cost of each mode
+        List<ModeStat> _modeStats = new List<ModeStat>();   // prepared in RefreshBasic, drawn in paint
         readonly List<PillButton> _modeBtns = new List<PillButton>();
 
         /// <summary>Preset.Code of the profile the machine currently matches, 0 for custom.
@@ -749,6 +750,16 @@ namespace PowerDial
             foreach (Control c in _root.Controls)
             {
                 if (c == _basicCard) { c.Visible = basic; continue; }
+
+                // Three of these are the bodies of collapsible sections, and they are
+                // collapsed by default. Showing the column must not force them open: doing
+                // that left the chevron reading "collapsed" over an expanded section, and
+                // dumped the settings, the GPU watch and the log on someone who had never
+                // asked for them. In Advanced they follow their own toggle.
+                if (c == _basicBox) { c.Visible = !basic && _basicToggle.Expanded; continue; }
+                if (c == _watchBox) { c.Visible = !basic && _watchToggle.Expanded; continue; }
+                if (c == _logBox) { c.Visible = !basic && _logToggle.Expanded; continue; }
+
                 c.Visible = !basic;
             }
 
@@ -906,29 +917,7 @@ namespace PowerDial
         {
             PillButton btn = null;
             foreach (PillButton b in _modeBtns) if (b.Text == p.Friendly) btn = b;
-
-            // Note what it was drawing first, so the change can be compared against it.
-            if (_avg.Known)
-                Config.MarkOptimised(_avg.Watts, _avg.Minutes, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-
-            BeginBusy(btn, p.Values.Count + 1);
-            int ok = 0, fail = 0;
-            foreach (KeyValuePair<string, int> kv in p.Values)
-            {
-                Knob k = PowerCfg.Find(kv.Key);
-                if (k == null) continue;
-                BusyStep();
-                string err = PowerCfg.WriteDc(k, kv.Value);
-                if (err != null) { Log("   could not set " + k.Label + ": " + err); fail++; continue; }
-                int? back = PowerCfg.Read(k, true);
-                if (back.HasValue && back.Value == kv.Value) ok++; else { Log("   " + k.Label + " did not stick"); fail++; }
-            }
-            Log(p.Friendly + ": " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
-            ResetDrawWindow();
-            BusyStep();
-            LoadValues(); RefreshWatch(); RefreshFixes();
-            EndBusy();
-            RefreshBasic();
+            WriteProfile(p, btn, p.Friendly);
         }
 
         /// <summary>
@@ -974,9 +963,8 @@ namespace PowerDial
         /// laptop really drew in each, over stated amounts of time, rather than predicting
         /// anything. A mode with too little recorded says so.
         /// </summary>
-        List<ModeStat> ModeStats()
+        List<ModeStat> ModeStats(List<HistPoint> all)
         {
-            List<HistPoint> all = History.Recent(200000);
             List<ModeStat> outp = new List<ModeStat>();
 
             foreach (Preset p in Presets.Basic)
@@ -1004,7 +992,9 @@ namespace PowerDial
             Theme.Quality(g);
             g.Clear(Theme.Panel);
 
-            List<ModeStat> stats = ModeStats();
+            // Prepared by RefreshBasic. A paint handler runs on every expose, resize and
+            // invalidate, so it must not read files or parse anything.
+            List<ModeStat> stats = _modeStats;
             double max = 0;
             int measured = 0;
             foreach (ModeStat st in stats) { if (st.Minutes > 0) { measured++; if (st.Watts > max) max = st.Watts; } }
@@ -1077,7 +1067,10 @@ namespace PowerDial
                   "are on battery, and Undo puts them back.";
             _btnOptimise.Text = fixable == 0 ? "Check again" : "Optimise my battery";
 
-            _basicSaved.Text = SavedText();
+            // One pass over history for both of these, rather than one each.
+            List<HistPoint> hist = History.All();
+            _modeStats = ModeStats(hist);
+            _basicSaved.Text = SavedText(hist);
             if (_modeTable != null) _modeTable.Invalidate();
 
             string left = "Battery time left: not measured yet";
@@ -1104,7 +1097,7 @@ namespace PowerDial
         /// What the last optimise was worth, or an honest reason there is no figure yet.
         /// Both averages are measured here; nothing is modelled.
         /// </summary>
-        string SavedText()
+        string SavedText(List<HistPoint> hist)
         {
             Config c = Config.Current;
             if (!c.BeforeWatts.HasValue || c.OptimisedAtUnix <= 0)
@@ -1112,7 +1105,7 @@ namespace PowerDial
                        "this laptop, not estimated.";
 
             List<HistPoint> since = new List<HistPoint>();
-            foreach (HistPoint p in History.Recent(200000))
+            foreach (HistPoint p in hist)
                 if (p.T >= c.OptimisedAtUnix) since.Add(p);
 
             RuntimeAverage after = RuntimeAverage.From(since);
@@ -1167,25 +1160,7 @@ namespace PowerDial
                     "Optimise my battery", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
 
-            // Note what it was drawing first - this is the only "before" that can ever exist.
-            if (_avg.Known)
-                Config.MarkOptimised(_avg.Watts, _avg.Minutes, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-
-            BeginBusy(_btnOptimise, doable.Count + 1);
-            int ok = 0, fail = 0;
-            foreach (Suggestion g in doable)
-            {
-                BusyStep();
-                string err = Advisor.Apply(g);
-                if (err != null) { Log("   " + g.Title + ": " + err); fail++; }
-                else { Log("   " + g.Title + " -> " + g.ThenText); ok++; }
-            }
-            Log("Optimised: " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
-            ResetDrawWindow();
-            BusyStep();
-            LoadValues(); RefreshWatch(); RefreshFixes();
-            EndBusy();
-            RefreshBasic();
+            WriteFixes(doable, _btnOptimise);
         }
 
         void BuildWattsStrip()
@@ -1339,6 +1314,37 @@ namespace PowerDial
             _busyBtn = null;
             _root.Enabled = true;
             _busyTotal = 0; _busyDone = 0;
+        }
+
+        /// <summary>
+        /// Release what the form owns that the form does not already own.
+        ///
+        /// WinForms disposes child <see cref="Control"/>s through the Controls collection,
+        /// so every card, label and button is already handled. These are not controls -
+        /// they are components and kernel objects that nothing else releases: the WMI
+        /// searchers inside <see cref="BatteryMonitor"/>, the tray icon, the named event the
+        /// relaunch thread waits on, and three timers.
+        /// </summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_poll != null) { _poll.Stop(); _poll.Dispose(); }
+                if (_commit != null) { _commit.Stop(); _commit.Dispose(); }
+                if (_tick != null) { _tick.Stop(); _tick.Dispose(); }
+
+                // Hide before disposing or the icon can outlive the process in the tray
+                // until something makes the shell re-enumerate it.
+                if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
+
+                if (_bat != null) _bat.Dispose();
+
+                // The relaunch thread is a background thread waiting on this. Quit() has
+                // already set it and set _quitting, so it has been released; it swallows
+                // the exception if it has not yet noticed.
+                if (_wake != null) _wake.Dispose();
+            }
+            base.Dispose(disposing);
         }
 
         /// <summary>Scroll the column so a section sits just under the pinned header.</summary>
@@ -1884,24 +1890,52 @@ namespace PowerDial
             return "everything recorded";
         }
 
+        // What RefreshHistory last did its arithmetic over. The averages and the summary
+        // line only change when a point is appended or the range button moves, but the poll
+        // runs four times a minute - and over the All range that arithmetic sorts every
+        // recorded point to find its percentiles.
+        int _histVersion = -1, _histRange = -1;
+
         void RefreshHistory(bool seedChart)
         {
             // 0 means everything kept on disk - three months at one point a minute.
             List<HistPoint> pts = History.Recent(_rangeMin > 0 ? _rangeMin : 200000);
             _batChart.SetData(pts);
 
-            if (seedChart)
+            // The arithmetic below only changes when a point is appended or the range moves,
+            // but the poll runs four times a minute - and over the All range RuntimeAverage
+            // sorts every recorded point to find its percentiles. Skip it when the inputs
+            // are the same as last time.
+            bool changed = seedChart || History.Version != _histVersion || _rangeMin != _histRange;
+            _histVersion = History.Version;
+            _histRange = _rangeMin;
+
+            if (changed)
             {
-                List<double> w = new List<double>();
-                foreach (HistPoint p in pts) if (!p.Ac && p.W > 0.05) w.Add(p.W);
-                _chartWatts.Seed(w);
+                if (seedChart)
+                {
+                    List<double> w = new List<double>();
+                    foreach (HistPoint p in pts) if (!p.Ac && p.W > 0.05) w.Add(p.W);
+                    _chartWatts.Seed(w);
+                }
+
+                // the average runtime in the header comes from these same recorded points, so
+                // it is recomputed here rather than anywhere it could drift out of step
+                _avg = RuntimeAverage.From(pts);
+                RefreshHistoryLabel(pts);
             }
 
-            // the average runtime in the header comes from these same recorded points, so
-            // it is recomputed here rather than anywhere it could drift out of step
-            _avg = RuntimeAverage.From(pts);
+            // Not inside the guard: this reads what is left in the pack right now, which
+            // moves on every poll even when no new point has been recorded. Skipping it
+            // froze the header time-left figure between minutes.
             PushAverage();
 
+            RefreshOffenders();
+        }
+
+        /// <summary>The one-line summary under the charts.</summary>
+        void RefreshHistoryLabel(List<HistPoint> pts)
+        {
             History.Stats st = History.Summarise(pts);
             string line = "Showing " + RangeWord() + "   ·   " + st.Points + " minutes recorded";
             if (st.BatteryPoints > 0)
@@ -1914,8 +1948,6 @@ namespace PowerDial
             long bytes = History.DiskBytes();
             line += "   ·   " + (bytes / 1024.0).ToString("0") + " KB on disk";
             _histLabel.Text = line;
-
-            RefreshOffenders();
         }
 
         /// <summary>
@@ -2413,7 +2445,22 @@ namespace PowerDial
                 "Make it last longer", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
-            BeginBusy(_fixApplyAll, doable.Count + 1);
+            WriteFixes(doable, _fixApplyAll);
+        }
+
+        /// <summary>
+        /// Carry out a list of suggestions. The single place that happens for more than one
+        /// at a time: the one button in Basic and Apply-every-fix in Advanced are the same
+        /// work, and were the same twenty lines written twice.
+        /// </summary>
+        void WriteFixes(List<Suggestion> doable, PillButton on)
+        {
+            // The only "before" a saving can ever be measured against, taken before anything
+            // changes.
+            if (_avg.Known)
+                Config.MarkOptimised(_avg.Watts, _avg.Minutes, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+            BeginBusy(on, doable.Count + 1);
             int ok = 0, fail = 0;
             foreach (Suggestion s in doable)
             {
@@ -2430,6 +2477,7 @@ namespace PowerDial
             BusyStep();
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();
+            RefreshBasic();
         }
 
         void ApplyKnob(Row row, int value)
@@ -2460,17 +2508,32 @@ namespace PowerDial
         }
 
 
-        void ApplyPreset(Preset p)
+        /// <summary>
+        /// Write one profile to the battery side, verifying every value as it goes.
+        ///
+        /// The single place a profile is applied. Basic mode and Advanced both come through
+        /// here, so the read-back that invariant 3 requires cannot be forgotten in one of
+        /// them, and "how a profile is applied" has one definition.
+        /// </summary>
+        /// <param name="p">the profile</param>
+        /// <param name="on">the button to spin while it runs</param>
+        /// <param name="label">what to call it in the log - the profile name, or the
+        /// plain-language name Basic shows</param>
+        void WriteProfile(Preset p, PillButton on, string label)
         {
-            Log("Applying " + p.Name + "...");
-            PillButton pb = null;
-            foreach (PillButton b in _presetBtns) if (b.Text == p.Name) pb = b;
-            BeginBusy(pb, p.Values.Count + 1);
+            Log("Applying " + label + "...");
+
+            // Note what it was drawing first: the only "before" a saving can be measured
+            // against, and it has to be taken before anything changes.
+            if (_avg.Known)
+                Config.MarkOptimised(_avg.Watts, _avg.Minutes, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+            BeginBusy(on, p.Values.Count + 1);
             int ok = 0, fail = 0;
             foreach (KeyValuePair<string, int> kv in p.Values)
             {
                 Knob k = PowerCfg.Find(kv.Key);
-                if (k == null) continue;
+                if (k == null) continue;                 // Windows does not define it here
                 BusyStep();
                 string err = PowerCfg.WriteDc(k, kv.Value);
                 if (err != null) { Log("   could not set " + k.Label + ": " + err); fail++; continue; }
@@ -2478,7 +2541,7 @@ namespace PowerDial
                 if (back.HasValue && back.Value == kv.Value) { Log("   " + k.Label + " -> " + PowerCfg.Describe(k, kv.Value)); ok++; }
                 else { Log("   " + k.Label + " did not stick"); fail++; }
             }
-            Log(p.Name + ": " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
+            Log(label + ": " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
             if (fail > 0) ShowLog();
 
             foreach (PillButton b in _presetBtns) b.Selected = (b.Text == p.Name);
@@ -2486,6 +2549,14 @@ namespace PowerDial
             BusyStep();
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();
+            RefreshBasic();
+        }
+
+        void ApplyPreset(Preset p)
+        {
+            PillButton pb = null;
+            foreach (PillButton b in _presetBtns) if (b.Text == p.Name) pb = b;
+            WriteProfile(p, pb, p.Name);
         }
 
         void RestoreBaseline()

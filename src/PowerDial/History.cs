@@ -181,31 +181,91 @@ namespace PowerDial
         }
 
         /// <summary>Most recent points, oldest first. Reads at most the last two months.</summary>
-        public static List<HistPoint> Recent(int max)
+        // Parsed history, kept in memory. Reading it is not cheap - about 5.7 us a point,
+        // so at the three-month retention limit a single read is roughly 0.75 s - and the
+        // window asks for it several times a poll, plus once per repaint. Re-parsing the
+        // same unchanged file that often cost ~15% of a core in an app whose entire job is
+        // saving power. The file only changes when Append writes a line, so parse it once
+        // and hand the same list back until it does.
+        static List<HistPoint> _cache;
+        static string _cacheKey = "";
+
+        /// <summary>Bumped every time the file is re-read. Lets a caller skip work that
+        /// only needs redoing when the data actually changed - the window polls four times
+        /// a minute against one appended line a minute.</summary>
+        public static int Version { get; private set; }
+
+        /// <summary>Name, length and last-write of the files we read. Changes on every
+        /// append, so it is enough to know the cache is stale - and it is two stat calls
+        /// rather than a parse.</summary>
+        static string StampKey(string[] files)
         {
-            List<HistPoint> outp = new List<HistPoint>();
-            try
+            System.Text.StringBuilder b = new System.Text.StringBuilder();
+            foreach (string f in files)
             {
-                DateTime utc = DateTime.UtcNow;
-                string[] files = { MonthFile(utc.AddMonths(-1)), MonthFile(utc) };
-                foreach (string f in files)
+                b.Append(f).Append('|');
+                try
                 {
-                    if (!File.Exists(f)) continue;
-                    foreach (string line in File.ReadAllLines(f))
+                    FileInfo fi = new FileInfo(f);
+                    if (fi.Exists) b.Append(fi.Length).Append('@').Append(fi.LastWriteTimeUtc.Ticks);
+                    else b.Append('-');
+                }
+                catch { b.Append('?'); }
+                b.Append(';');
+            }
+            return b.ToString();
+        }
+
+        /// <summary>
+        /// Every recorded point, oldest first.
+        ///
+        /// The returned list is shared and must be treated as read-only - copying it per
+        /// call is exactly the cost this cache exists to avoid. Callers iterate it; nothing
+        /// mutates it.
+        /// </summary>
+        public static List<HistPoint> All()
+        {
+            DateTime utc = DateTime.UtcNow;
+            string[] files = { MonthFile(utc.AddMonths(-1)), MonthFile(utc) };
+
+            lock (Gate)
+            {
+                string key = StampKey(files);
+                if (_cache != null && key == _cacheKey) return _cache;
+
+                List<HistPoint> outp = new List<HistPoint>();
+                try
+                {
+                    foreach (string f in files)
                     {
-                        if (line.Length < 5) continue;
-                        try
+                        if (!File.Exists(f)) continue;
+                        foreach (string line in File.ReadAllLines(f))
                         {
-                            HistPoint p = JsonSerializer.Deserialize(line, CompactJson.Default.HistPoint);
-                            if (p != null && p.T > 0) outp.Add(p);
+                            if (line.Length < 5) continue;
+                            try
+                            {
+                                HistPoint p = JsonSerializer.Deserialize(line, CompactJson.Default.HistPoint);
+                                if (p != null && p.T > 0) outp.Add(p);
+                            }
+                            catch { }
                         }
-                        catch { }
                     }
                 }
+                catch { }
+
+                _cache = outp;
+                _cacheKey = key;
+                Version++;
+                return _cache;
             }
-            catch { }
-            if (outp.Count > max) outp.RemoveRange(0, outp.Count - max);
-            return outp;
+        }
+
+        /// <summary>The most recent <paramref name="max"/> points. Read-only, like All().</summary>
+        public static List<HistPoint> Recent(int max)
+        {
+            List<HistPoint> all = All();
+            if (max <= 0 || all.Count <= max) return all;
+            return all.GetRange(all.Count - max, max);
         }
 
         public sealed class Stats

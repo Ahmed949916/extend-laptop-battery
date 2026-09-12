@@ -203,7 +203,12 @@ namespace PowerDial
             public int BatteryFullLifeTime;
         }
 
+        // Pin the search to the system directory. Without it the loader walks a search
+        // order that includes the application directory, so a kernel32.dll dropped beside
+        // the exe would be loaded in preference - the classic DLL-planting route into a
+        // process. This one is a system DLL and has no business being found anywhere else.
         [DllImport("kernel32.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool GetSystemPowerStatus(out POWER_STATUS status);
     }

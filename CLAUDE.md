@@ -56,7 +56,18 @@ settings and the `NoWarn` list; `Directory.Packages.props` holds package version
 `PowerDial.slnx` ties both projects together.
 
 **Warnings are errors.** Suppressions go in the root `NoWarn` list with a comment saying
-why — never a `#pragma` at the call site.
+why — never a `#pragma` at the call site. `.editorconfig` turns on a few rules beyond
+`latest-recommended` and turns two off, each with its reason.
+
+**Run the full analyzer audit by hand after significant work**, and triage rather than obey:
+
+    dotnet build -c Release --no-incremental -p:AnalysisLevel=latest-all -p:TreatWarningsAsErrors=false
+
+Most of `latest-all` is library-design rules that do not apply to a single-assembly desktop
+app, which is why it is not on by default. It has still earned its keep: it found the
+disposables `MainForm` was leaking and the unhardened P/Invoke. **CA2213 and CA2000 are not
+wired into the build** — on WinForms they fire on every `Control` field and on a timer
+disposed inside its own `Tick`, about forty false positives here.
 
 **The selftest references the app project**, so it cannot go stale. It enables
 `UseWindowsForms` only because the app it references is a WinExe.
@@ -101,6 +112,10 @@ instead of pretending there is a button.
 
 **A profile** — add a `Preset` to `Presets.cs`: a name, a blurb, and a dictionary of knob
 key to battery-side value. Every key must exist in `PowerCfg`; the selftest checks that.
+Give it a `Code` that has never been used before, and a `Friendly` name only if it should
+appear in Basic. **Applying one goes through `WriteProfile`** — the single place a profile
+is written, so the read-back invariant 3 requires cannot be forgotten in one path and not
+the other. `WriteFixes` is the same idea for a list of suggestions.
 
 **A tab** — the strip is built in `BuildNav`, from two parallel arrays: `names` are section
 headings registered by `Heading`/`WithInfo`, `labels` are what is drawn. A name that does
@@ -249,6 +264,35 @@ anything.
 The scan runs on startup, once more on the first poll, and after any change - not on the
 poll timer. The extra pass exists because CPU is a delta: the startup sample has memory
 figures and zero CPU, so anything judging a process by what it burns was reading zeroes.
+
+## Cost, and where it goes
+
+Measured on the test machine, per 15-second poll:
+
+| | ms |
+|---|---|
+| `ProcessWatch.Sample` | ~21 |
+| `BatteryMonitor.Poll` (WMI) | ~6 |
+| every UI refresh together | <0.5 |
+
+That is about **0.2% of one core**. The two big items are process enumeration and WMI, and
+both are inherent — if the cost has to come down, sample processes less often than the
+battery rather than trying to make either call cheaper.
+
+Two rules keep it there, and both were learned by measuring:
+
+- **`History.All()` is cached; do not go back to parsing per call.** Parsing costs ~5.7 us a
+  point, so at the three-month retention limit one read is ~0.75 s. The window wanted it
+  several times a poll and once per repaint, which worked out at ~15% of a core spent
+  re-reading an unchanged file — in an app whose whole purpose is saving power. The cache is
+  keyed on the files' length and last-write, so an append invalidates it. **The list it
+  returns is shared: treat it as read-only.**
+- **A paint handler must not read files or parse anything.** It runs on every expose, resize
+  and invalidate. `PaintModeTable` draws from a `List<ModeStat>` that `RefreshBasic`
+  prepared; it does not query history itself.
+- `RefreshHistory` skips its arithmetic when neither `History.Version` nor the range has
+  changed — but **`PushAverage` stays outside that guard**, because it reads what is left in
+  the pack right now. Skipping it froze the header time-left figure between minutes.
 
 ## Telemetry and persistence
 

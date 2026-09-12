@@ -209,7 +209,7 @@ sealed class SelfTest
         Console.WriteLine();
 
         Console.WriteLine("--- live battery measurement (needs " + 20 + " s) ---");
-        BatteryMonitor m = new BatteryMonitor();
+        using BatteryMonitor m = new BatteryMonitor();   // holds WMI searchers
         m.WindowSeconds = 20;
         m.Poll();
         Console.WriteLine("  remaining     : " + (m.RemainingMwh.HasValue ? m.RemainingMwh.Value + " mWh" : "n/a"));

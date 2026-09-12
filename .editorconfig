@@ -1,0 +1,43 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# ---------------------------------------------------------------------------------------
+# Analyzers beyond latest-recommended.
+#
+# The full `latest-all` set produces several hundred warnings here, nearly all library-design
+# rules that do not apply to a single-assembly desktop app: localise every string literal
+# (CA1303), validate arguments of public methods (CA1062), never expose List<T> (CA1002),
+# make every type internal (CA1515 - the selftest references these types). Turning the whole
+# set on would bury the few that matter, so it is not on by default.
+#
+# Run the audit by hand after significant work, and triage rather than obey:
+#
+#   dotnet build -c Release --no-incremental -p:AnalysisLevel=latest-all -p:TreatWarningsAsErrors=false
+#
+# It has found real defects: BatteryMonitor (which holds WMI searchers), the tray icon, the
+# named relaunch event and three timers were all being leaked by MainForm, none of which the
+# Controls collection cleans up - that is what MainForm.Dispose now exists for. It also found
+# the P/Invoke with no search-path restriction.
+#
+# CA2213 and CA2000 are deliberately NOT wired into the build. On WinForms they fire on every
+# Control field and on any timer disposed inside its own Tick handler - about forty false
+# positives here - so as build errors they would be noise, and noise gets suppressed wholesale.
+# ---------------------------------------------------------------------------------------
+
+# Clean, cheap, and catch real problems - these stay on as errors.
+dotnet_diagnostic.CA5392.severity = error
+dotnet_diagnostic.CA1823.severity = error
+
+# Deliberate, and explained where they happen:
+#   CA1031 - persistence and hardware probing catch everything on purpose; a full disk or a
+#            missing WMI class must not take a tray app down. Failures that matter go to
+#            Diag rather than being swallowed silently.
+#   CA2227 - the JSON serialiser needs settable collection properties on persisted types.
+dotnet_diagnostic.CA1031.severity = none
+dotnet_diagnostic.CA2227.severity = none

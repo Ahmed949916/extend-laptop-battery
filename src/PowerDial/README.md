@@ -52,9 +52,11 @@ battery's own energy counter over a 60-second window. That means:
 - changing any setting resets the window and clears the trace, so what you see next
   reflects the new state instead of averaging across the change
 
-**Profiles.** Endurance / Balanced / Full speed. *Balanced* is the configuration that
-actually measured **6.92 W (6h21m)**. All of them write the **on-battery side only** —
-plugged-in behaviour is never touched, which is what kept this safe to experiment with.
+**Profiles.** Longest / Endurance / Balanced / Full speed - shown as *Max battery* /
+*Battery saver* / *Balanced* / *Performance*, the same four Basic mode's named modes are.
+*Balanced* is the configuration that actually measured **6.92 W (6h21m)**. All of them
+write the **on-battery side only** — plugged-in behaviour is never touched, which is what
+kept this safe to experiment with.
 
 **Restore my settings.** Puts back the battery settings as they stood before PowerDial
 existed. The snapshot is taken on first run; since the app writes nothing until you touch

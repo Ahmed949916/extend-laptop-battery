@@ -23,8 +23,10 @@ presets, **Restore original settings**, or **Quit**. Only one instance runs at a
 
 **Basic** is what opens the first time. One card:
 
-- **Three modes** — *More battery*, *Normal*, *More performance*. One click each, battery
-  side only, and it says which one is in effect right now.
+- **Four modes** — *Max battery*, *Battery saver*, *Balanced*, *Performance*. One click
+  each, battery side only, and it says which one is in effect right now. They are the same
+  four profiles Advanced lists under *Profiles*, named for reading rather than for tuning -
+  pick one there and Basic shows it selected too.
 - **What is costing you battery life**, and a button that fixes it. Undo puts it all back.
 - **What each mode has actually cost you** — the measured average draw recorded while that
   mode was in effect, and what it works out to per charge. This is the useful part and it
@@ -118,9 +120,11 @@ battery's own energy counter over a 60-second window. That means:
 - changing any setting resets the window and clears the trace, so what you see next
   reflects the new state instead of averaging across the change
 
-**Profiles.** Longest / Endurance / Balanced / Full speed. *Balanced* is the configuration
-that actually measured **6.92 W (6h21m)**. All of them write the **on-battery side only**;
-a profile never touches plugged-in behaviour.
+**Profiles.** Longest / Endurance / Balanced / Full speed - shown as *Max battery* /
+*Battery saver* / *Balanced* / *Performance*, the same names and the same four buttons
+Basic mode offers. *Balanced* is the configuration that actually measured **6.92 W
+(6h21m)**. All of them write the **on-battery side only**; a profile never touches
+plugged-in behaviour.
 
 **Restore my settings.** Puts back the battery settings as they stood before PowerDial
 existed. The snapshot is taken on first run; since the app writes nothing until you touch

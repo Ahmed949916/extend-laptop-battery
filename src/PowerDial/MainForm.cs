@@ -40,6 +40,7 @@ namespace PowerDial
         Panel _chrome;              // header + watts strip + section bar, pinned above the scroll
         Card _wattsStrip;           // "Where your watts go", pinned so it never scrolls away
         Card _basicCard;            // the whole of Basic mode
+        Panel _modesPanel;          // holds the Basic mode row - resized alongside _basicCard
         PillButton _btnBasic, _btnAdvanced, _btnOptimise;
         Label _basicState, _basicSaved, _basicStats, _basicNow;
         Panel _modeTable;                              // measured cost of each mode
@@ -356,28 +357,19 @@ namespace PowerDial
 
             // ---------------------------------------------------------- profiles
             _root.Controls.Add(Heading("Profiles", "each one writes the battery side only",
-                "Three tested combinations of the settings below, plus a way back.\n\n" +
-                "Balanced is the sensible default on any machine. Endurance trades responsiveness for " +
-                "the last watt or so. Full speed lets the CPU off the leash while still on battery.\n\n" +
+                "Four tested combinations of the settings below, plus a way back. The same four " +
+                "Basic offers as its named modes - this is what each one actually sets.\n\n" +
+                "Balanced is the sensible default on any machine. Battery saver trades responsiveness " +
+                "for the last watt or so; Max battery goes further still and is the only one that " +
+                "turns boost off outright. Performance lets the CPU off the leash while still on " +
+                "battery.\n\n" +
                 "Apply one, then watch the power draw chart for a minute - what each is worth " +
                 "depends entirely on the hardware.\n\n" +
                 "Every profile writes the on-battery side only. What happens when you are plugged " +
                 "in is never touched, which is what made all of this safe to experiment with."));
 
             Panel profiles = new Panel { Width = W, Height = 40, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 8) };
-            int count = Math.Max(1, Presets.All.Count);
-            int px = 0, bw = (W - (count - 1) * 8) / count;
-            foreach (Preset p in Presets.All)
-            {
-                Preset local = p;
-                PillButton b = new PillButton {
-                    Text = p.Name, Location = new Point(px, 0), Size = new Size(bw, 36), Primary = false
-                };
-                b.Click += (s, e) => ApplyPreset(local);
-                profiles.Controls.Add(b);
-                _presetBtns.Add(b);
-                px += bw + 8;
-            }
+            _presetBtns.AddRange(BuildProfileRow(profiles, Presets.All, 36, (p, b) => WriteProfile(p, b)));
             _root.Controls.Add(profiles);
 
             Panel restoreRow = new Panel { Width = W, Height = 38, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 2) };
@@ -835,14 +827,14 @@ namespace PowerDial
 
         void BuildBasicCard()
         {
-            _basicCard = new Card { Width = W, Height = 446, Margin = new Padding(0, 0, 0, 10) };
+            _basicCard = new Card { Width = W, Height = 470, Margin = new Padding(0, 0, 0, 10) };
 
             _basicCard.Controls.Add(new Label {
                 Text = "Make this battery last longer", Location = new Point(18, 12), AutoSize = true,
                 Font = Theme.Head, ForeColor = Theme.Text, BackColor = Theme.Panel });
 
             _basicState = new Label {
-                Location = new Point(18, 262), Size = new Size(W - 40, 34),
+                Location = new Point(18, 286), Size = new Size(W - 40, 34),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Body, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             _basicCard.Controls.Add(_basicState);
@@ -866,41 +858,32 @@ namespace PowerDial
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             _basicCard.Controls.Add(_basicNow);
 
-            // Three named modes rather than ten sliders. They are the existing profiles, so
-            // there is one definition of what each one means, and Advanced shows the same
-            // settings underneath.
-            int mx = 18;
-            foreach (Preset pr in Presets.Basic)
-            {
-                Preset local = pr;
-                PillButton mb = new PillButton {
-                    Text = pr.Friendly, Location = new Point(mx, 106), Size = new Size(168, 40),
-                    BackColor = Theme.Panel
-                };
-                mb.Click += (s, e) => PickMode(local);
-                _modeBtns.Add(mb);
-                _basicCard.Controls.Add(mb);
-                mx += 176;
-            }
+            // Four named modes rather than ten sliders. They are the existing profiles - the
+            // same ones Advanced offers, through the same row (BuildProfileRow) - so there is
+            // one definition of what each one means and one place that builds the button row.
+            _modesPanel = new Panel {
+                Location = new Point(18, 106), Size = new Size(W - 40, 40), BackColor = Theme.Panel };
+            _basicCard.Controls.Add(_modesPanel);
+            _modeBtns.AddRange(BuildProfileRow(_modesPanel, Presets.Basic, 40, (p, b) => WriteProfile(p, b)));
 
             _basicCard.Controls.Add(new Label {
                 Text = "What each mode has actually cost you", Location = new Point(18, 158),
                 AutoSize = true, Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
 
             _modeTable = new Panel {
-                Location = new Point(18, 182), Size = new Size(W - 40, 74), BackColor = Theme.Panel,
+                Location = new Point(18, 182), Size = new Size(W - 40, 98), BackColor = Theme.Panel,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             _modeTable.Paint += (s, e) => PaintModeTable(e.Graphics);
             _basicCard.Controls.Add(_modeTable);
 
             _basicSaved = new Label {
-                Location = new Point(18, 300), Size = new Size(W - 40, 52),
+                Location = new Point(18, 324), Size = new Size(W - 40, 52),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Body, ForeColor = Theme.Text, BackColor = Theme.Panel };
             _basicCard.Controls.Add(_basicSaved);
 
             _basicStats = new Label {
-                Location = new Point(18, 356), Size = new Size(W - 40, 80),
+                Location = new Point(18, 380), Size = new Size(W - 40, 80),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             _basicCard.Controls.Add(_basicStats);
@@ -910,19 +893,63 @@ namespace PowerDial
         }
 
         /// <summary>
-        /// Apply one of the three named modes. The same code path as a profile in Advanced,
-        /// because they are the same profiles - one definition of what each mode means.
+        /// A row of profile buttons, evenly sharing the container's width - one button per
+        /// preset, labelled the same way everywhere (`Friendly ?? Name`). Basic and Advanced
+        /// both build their profile row through here: one definition of what a profile button
+        /// looks like, how wide it is, and what happens when it is clicked. Only the presets
+        /// offered and the button height differ between the two callers.
+        ///
+        /// Selection is never set from the click - <see cref="RefreshModeCode"/> sets it
+        /// afterwards from what the machine actually reads back, the same way for every row
+        /// this builds, so a row this method built is never the thing deciding it is "on".
         /// </summary>
-        void PickMode(Preset p)
+        static List<PillButton> BuildProfileRow(Panel container, List<Preset> presets, int buttonHeight, Action<Preset, PillButton> onPick)
         {
-            PillButton btn = null;
-            foreach (PillButton b in _modeBtns) if (b.Text == p.Friendly) btn = b;
-            WriteProfile(p, btn, p.Friendly);
+            List<PillButton> outp = new List<PillButton>();
+            int count = Math.Max(1, presets.Count);
+            int bw = (container.Width - (count - 1) * 8) / count;
+            int px = 0;
+            foreach (Preset p in presets)
+            {
+                Preset local = p;
+                PillButton b = new PillButton {
+                    Text = p.Friendly ?? p.Name, Location = new Point(px, 0), Size = new Size(bw, buttonHeight),
+                    BackColor = container.BackColor, Tag = local
+                };
+                b.Click += (s, e) => onPick(local, b);
+                container.Controls.Add(b);
+                outp.Add(b);
+                px += bw + 8;
+            }
+            return outp;
         }
 
         /// <summary>
-        /// Read back which profile the machine now matches. Called after anything that
-        /// writes a setting, never on the poll - it is a registry read per knob per profile.
+        /// Re-space a row BuildProfileRow already built, to share a new width - called from
+        /// Relayout, on window resize. Anchoring would overlap the buttons instead of
+        /// resizing each one, so this is run by hand.
+        /// </summary>
+        static void RespaceRow(List<PillButton> row, int width)
+        {
+            if (row.Count == 0) return;
+            int bw = (width - (row.Count - 1) * 8) / row.Count;
+            int px = 0;
+            foreach (PillButton b in row)
+            {
+                b.Location = new Point(px, 0);
+                b.Width = bw;
+                px += bw + 8;
+            }
+        }
+
+        /// <summary>
+        /// Read back which profile the machine now matches, and mark it selected everywhere
+        /// a profile can be picked - the Basic mode row and the Advanced profile row are two
+        /// separate rows of buttons (one WinForms control can only live in one place), but
+        /// both were built by <see cref="BuildProfileRow"/> and both get their "you are here"
+        /// from this one read, matched by which preset a button's Tag actually is rather than
+        /// by comparing text. Called after anything that writes a setting, never on the poll
+        /// - it is a registry read per knob per profile.
         /// </summary>
         void RefreshModeCode()
         {
@@ -930,18 +957,20 @@ namespace PowerDial
             _modeCode = m == null ? 0 : m.Code;
             foreach (PillButton b in _modeBtns)
             {
-                bool on = m != null && b.Text == m.Friendly;
+                bool on = m != null && (Preset)b.Tag == m;
+                if (b.Selected != on) { b.Selected = on; b.Invalidate(); }
+            }
+            foreach (PillButton b in _presetBtns)
+            {
+                bool on = m != null && (Preset)b.Tag == m;
                 if (b.Selected != on) { b.Selected = on; b.Invalidate(); }
             }
 
             if (_basicNow != null)
             {
-                if (m == null)
-                    _basicNow.Text = "Right now: a custom mix of settings. Pick one below to make it a known mode.";
-                else if (m.Friendly != null)
-                    _basicNow.Text = "Right now: " + m.Friendly + " - " + m.Blurb;
-                else
-                    _basicNow.Text = "Right now: " + m.Name + ", an Advanced profile. " + m.Blurb;
+                _basicNow.Text = m == null
+                    ? "Right now: a custom mix of settings. Pick one below to make it a known mode."
+                    : "Right now: " + (m.Friendly ?? m.Name) + " - " + m.Blurb;
             }
         }
 
@@ -974,7 +1003,7 @@ namespace PowerDial
 
                 RuntimeAverage r = RuntimeAverage.From(mine);
                 ModeStat st = new ModeStat();
-                st.Name = p.Friendly;
+                st.Name = p.Friendly ?? p.Name;
                 st.Minutes = r.Minutes;
                 st.Watts = r.Watts;
                 st.Hours = r.Known ? r.FromFull(_bat.FullChargeMwh) : null;
@@ -1413,6 +1442,7 @@ namespace PowerDial
                 _btnAdvanced.Left = _readout.Left + 78;
             }
             if (_basicCard != null) _basicCard.Width = w;
+            if (_modesPanel != null) _modesPanel.Width = w - 40;
             _wattsStrip.Left = _readout.Left;
             _navBar.Left = _readout.Left;
 
@@ -1428,19 +1458,13 @@ namespace PowerDial
                 c.Width = w;
             }
 
-            // the three profile buttons share the row, so they have to be re-spaced
-            // rather than anchored - anchoring all three would overlap them
-            if (_presetBtns.Count > 0)
-            {
-                int bw = (w - (_presetBtns.Count - 1) * 8) / _presetBtns.Count;
-                int px = 0;
-                foreach (PillButton b in _presetBtns)
-                {
-                    b.Location = new Point(px, 0);
-                    b.Width = bw;
-                    px += bw + 8;
-                }
-            }
+            // The profile buttons share their row, so they have to be re-spaced rather than
+            // anchored - anchoring all of them would overlap them. Both rows are built by
+            // the same BuildProfileRow and re-spaced the same way here; only the width they
+            // have to share differs - the full column for Advanced, the card's inner width
+            // (40px of margin either side) for Basic.
+            RespaceRow(_presetBtns, w);
+            RespaceRow(_modeBtns, w - 40);
 
             if (_fixList != null)
                 foreach (Control card in _fixList.Controls) card.Width = _fixList.Width;
@@ -1718,7 +1742,7 @@ namespace PowerDial
             foreach (Preset p in Presets.All)
             {
                 Preset local = p;
-                menu.Items.Add(p.Name, null, (s, e) => ApplyPreset(local));
+                menu.Items.Add(p.Friendly ?? p.Name, null, (s, e) => ApplyPreset(local));
             }
             menu.Items.Add("Restore my settings", null, (s, e) => RestoreBaseline());
             menu.Items.Add(new ToolStripSeparator());
@@ -2472,7 +2496,8 @@ namespace PowerDial
             Log("Applied " + ok + " suggestion(s)" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
             if (fail > 0) ShowLog();
 
-            foreach (PillButton b in _presetBtns) b.Selected = false;
+            // Whether this still matches a whole profile is for RefreshModeCode to say, once
+            // LoadValues below has it read the machine back - not for this method to assume.
             ResetDrawWindow();
             BusyStep();
             LoadValues(); RefreshWatch(); RefreshFixes();
@@ -2512,15 +2537,15 @@ namespace PowerDial
         /// Write one profile to the battery side, verifying every value as it goes.
         ///
         /// The single place a profile is applied. Basic mode and Advanced both come through
-        /// here, so the read-back that invariant 3 requires cannot be forgotten in one of
-        /// them, and "how a profile is applied" has one definition.
+        /// here - the same click handler BuildProfileRow wires up for both rows, plus the
+        /// tray menu via ApplyPreset - so the read-back that invariant 3 requires cannot be
+        /// forgotten in one of them, and "how a profile is applied" has one definition.
         /// </summary>
         /// <param name="p">the profile</param>
-        /// <param name="on">the button to spin while it runs</param>
-        /// <param name="label">what to call it in the log - the profile name, or the
-        /// plain-language name Basic shows</param>
-        void WriteProfile(Preset p, PillButton on, string label)
+        /// <param name="on">the button to spin while it runs, or null from the tray menu</param>
+        void WriteProfile(Preset p, PillButton on)
         {
+            string label = p.Friendly ?? p.Name;
             Log("Applying " + label + "...");
 
             // Note what it was drawing first: the only "before" a saving can be measured
@@ -2544,7 +2569,9 @@ namespace PowerDial
             Log(label + ": " + ok + " changed" + (fail > 0 ? ", " + fail + " failed" : "") + ".");
             if (fail > 0) ShowLog();
 
-            foreach (PillButton b in _presetBtns) b.Selected = (b.Text == p.Name);
+            // Selected is set by RefreshModeCode below (via LoadValues), from what the
+            // machine reads back - not assumed here just because this is the profile that
+            // was requested. A partly-failed write should not show as if it fully landed.
             ResetDrawWindow();
             BusyStep();
             LoadValues(); RefreshWatch(); RefreshFixes();
@@ -2552,11 +2579,10 @@ namespace PowerDial
             RefreshBasic();
         }
 
+        /// <summary>Applied from the tray menu, which has no button of its own to spin.</summary>
         void ApplyPreset(Preset p)
         {
-            PillButton pb = null;
-            foreach (PillButton b in _presetBtns) if (b.Text == p.Name) pb = b;
-            WriteProfile(p, pb, p.Name);
+            WriteProfile(p, null);
         }
 
         void RestoreBaseline()
@@ -2581,7 +2607,8 @@ namespace PowerDial
             BeginBusy(_btnRestore, 0);
             List<string> lines = Baseline.Restore();
             foreach (string line in lines) Log(line);
-            foreach (PillButton b in _presetBtns) b.Selected = false;
+            // Selection follows from LoadValues -> RefreshModeCode below, the same honest
+            // machine read every other write goes through.
             ResetDrawWindow();
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();

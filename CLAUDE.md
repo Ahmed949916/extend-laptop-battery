@@ -113,9 +113,12 @@ instead of pretending there is a button.
 **A profile** — add a `Preset` to `Presets.cs`: a name, a blurb, and a dictionary of knob
 key to battery-side value. Every key must exist in `PowerCfg`; the selftest checks that.
 Give it a `Code` that has never been used before, and a `Friendly` name only if it should
-appear in Basic. **Applying one goes through `WriteProfile`** — the single place a profile
-is written, so the read-back invariant 3 requires cannot be forgotten in one path and not
-the other. `WriteFixes` is the same idea for a list of suggestions.
+appear in Basic - leave `Friendly` null to add a profile Advanced offers but Basic does not.
+A button for it appears in both places automatically: both rows are built by
+`MainForm.BuildProfileRow` from `Presets.All` / `Presets.Basic`, nothing per-button to wire
+up. **Applying one goes through `WriteProfile`** — the single place a profile is written, so
+the read-back invariant 3 requires cannot be forgotten in one path and not the other.
+`WriteFixes` is the same idea for a list of suggestions.
 
 **A tab** — the strip is built in `BuildNav`, from two parallel arrays: `names` are section
 headings registered by `Heading`/`WithInfo`, `labels` are what is drawn. A name that does
@@ -145,20 +148,32 @@ editing the XML.
 
 `Config.Mode` is `basic` (the default) or `advanced`, remembered across launches.
 
-**Basic** is one card: three named modes (*More battery* / *Normal* / *More performance*),
-a button that applies everything the advisor can write, an Undo, what the last change was
-*measured* to be worth, and a table of what each mode has actually cost. Everything else in
-the column is hidden, along with the watts strip and the section bar. It is for someone who
-wants a laptop that lasts longer, not a registry editor.
+**Basic** is one card: four named modes (*Max battery* / *Battery saver* / *Balanced* /
+*Performance*), a button that applies everything the advisor can write, an Undo, what the
+last change was *measured* to be worth, and a table of what each mode has actually cost.
+Everything else in the column is hidden, along with the watts strip and the section bar. It
+is for someone who wants a laptop that lasts longer, not a registry editor.
 
-The three modes **are** the existing profiles - `Preset.Friendly` names them - so there is
-one definition of what each means and Advanced shows the same settings underneath.
-`Preset.Code` is a stable id written into every history point as `HistPoint.M`; **never
-renumber those**, old history on disk refers to them.
+The four modes **are** the existing profiles - `Preset.Friendly` names them, and Basic now
+offers the same four Advanced does, so there is one definition of what each means and
+Advanced shows the same settings underneath. `Preset.Code` is a stable id written into
+every history point as `HistPoint.M`; **never renumber those**, old history on disk refers
+to them. Renaming `Friendly` is safe any time - nothing on disk stores it, only `Code`.
+
+**One component builds both rows of buttons.** `MainForm.BuildProfileRow` takes a container
+and a list of presets and lays out one `PillButton` per preset, evenly sharing the row;
+Basic's mode row and Advanced's profile row are both built by calling it, with `Presets.Basic`
+and `Presets.All` respectively - today the same four presets, since every preset has a
+`Friendly` name, but the two lists are kept separate so an advanced-only profile could exist
+again later. Each button's `Tag` holds the `Preset` it represents; `RefreshModeCode` reads
+`Presets.Match()` once and sets `Selected` on whichever button's `Tag` is that preset, in
+**both** rows, rather than the two rows tracking selection separately. Button text is always
+`Friendly ?? Name` - see `Preset.Friendly` in `Presets.cs` for where the display names are
+chosen and why `Name` and `Friendly` are two different fields.
 
 **Advanced** is the whole instrument, exactly as before.
 
-Three rules:
+Six rules:
 
 1. **The saving is measured, never modelled.** `Config.BeforeWatts` is the recorded average
    at the moment Optimise ran; the "after" is `RuntimeAverage` over the points since
@@ -176,7 +191,7 @@ Three rules:
    tool is reflected. Knobs this PC does not define are skipped rather than counted as a
    mismatch. It is a registry read per knob per profile, so call it after a write - never on
    the poll. When the match is a profile Basic does not offer, or no profile at all, the
-   *Right now* line says which - three unlit buttons would otherwise read as "nothing set".
+   *Right now* line says which - four unlit buttons would otherwise read as "nothing set".
 5. **Per-mode cost is grouped measurement, not a benchmark.** `ModeStats` buckets recorded
    points by `HistPoint.M` and runs the same `RuntimeAverage` over each. A mode with under
    five recorded minutes says *not measured yet*. The bars scale against the thirstiest

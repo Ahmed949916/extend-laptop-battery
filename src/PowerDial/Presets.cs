@@ -15,7 +15,16 @@ namespace PowerDial
         /// </summary>
         public int Code;
 
-        /// <summary>Plain-language name for Basic mode. Null = not offered there.</summary>
+        /// <summary>
+        /// Plain-language display name - what every profile button shows, in Basic, in
+        /// Advanced and in the tray menu, and what the Activity log calls it when it is
+        /// applied. All three are built from `Friendly ?? Name` through the one shared row
+        /// (see `MainForm.BuildProfileRow`), so there is one place that decides what a
+        /// profile is called. `Name` above stays the internal id - stable, used only in
+        /// code (`Presets.Find`) and in comments here.
+        /// Null = not offered in Basic. Every current preset has a `Friendly`, because
+        /// Basic and Advanced now offer the same four modes - see `Presets.Basic`.
+        /// </summary>
         public string Friendly;
     }
 
@@ -36,13 +45,19 @@ namespace PowerDial
     /// to A/B the draw rather than trusting the label. For the same reason cpumax stays at
     /// 99 (boost off) rather than throttling to a fraction of base clock, which reliably
     /// makes everything slower without reliably drawing less over the whole task.
+    ///
+    /// The names above (`Name`) are this file's internal id for each preset; `Friendly` is
+    /// what a person actually reads, on the button and in the log: Longest -&gt; "Max
+    /// battery", Endurance -&gt; "Battery saver", Balanced -&gt; "Balanced", Full speed -&gt;
+    /// "Performance". Ordered least to most power, each a step past the last rather than a
+    /// vague "more" or "less".
     /// </summary>
     public static class Presets
     {
         public static readonly List<Preset> All = new List<Preset>
         {
             new Preset {
-                Name = "Longest", Code = 1,
+                Name = "Longest", Code = 1, Friendly = "Max battery",
                 Blurb = "Everything traded for runtime. Boost off, dimmest screen, sleeps quickly.",
                 Values = new Dictionary<string, int> {
                     { "epp", 100 },        // all efficiency, no chasing clocks at all
@@ -58,7 +73,7 @@ namespace PowerDial
                 }
             },
             new Preset {
-                Name = "Endurance", Code = 2, Friendly = "More battery",
+                Name = "Endurance", Code = 2, Friendly = "Battery saver",
                 Blurb = "Every last minute. Boost locked out, dim screen, quick sleep.",
                 Values = new Dictionary<string, int> {
                     { "epp", 90 },
@@ -73,7 +88,7 @@ namespace PowerDial
                 }
             },
             new Preset {
-                Name = "Balanced", Code = 3, Friendly = "Normal",
+                Name = "Balanced", Code = 3, Friendly = "Balanced",
                 Blurb = "The sensible default. Efficient without feeling slow.",
                 Values = new Dictionary<string, int> {
                     { "epp", 80 },
@@ -88,7 +103,7 @@ namespace PowerDial
                 }
             },
             new Preset {
-                Name = "Full speed", Code = 4, Friendly = "More performance",
+                Name = "Full speed", Code = 4, Friendly = "Performance",
                 Blurb = "Unrestricted CPU while on battery. Expect much shorter runtime.",
                 Values = new Dictionary<string, int> {
                     { "epp", 50 },
@@ -136,7 +151,13 @@ namespace PowerDial
             return null;
         }
 
-        /// <summary>The three offered in Basic mode, in order, least power first.</summary>
+        /// <summary>
+        /// The ones offered in Basic mode, in order, least power first. Every preset is
+        /// offered there today - Basic and Advanced show the same four profiles, through the
+        /// same button row - but the list stays filtered by `Friendly` rather than aliased
+        /// to `All`, so an advanced-only profile could still be added later without also
+        /// exposing it in Basic.
+        /// </summary>
         public static List<Preset> Basic
         {
             get

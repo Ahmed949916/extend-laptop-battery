@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PowerDial")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e656269c8d8ab4dd5aeebfec37779cf4536d9d0e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+597665d89e98f9d02a8f4d79c7aa62a5bd785755")]
 [assembly: System.Reflection.AssemblyProductAttribute("PowerDial")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PowerDial")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

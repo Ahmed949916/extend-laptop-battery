@@ -213,7 +213,6 @@ C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\wi
 C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\hostfxr.dll
 C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\hostpolicy.dll
 C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\mscordaccore.dll
-C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\mscordaccore_amd64_amd64_10.0.1126.37416.dll
 C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\mscordbi.dll
 C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\mscorrc.dll
 C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\msquic.dll
@@ -228,3 +227,4 @@ C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\wi
 C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\win-x64\PowerDial.genruntimeconfig.cache
 C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\win-x64\ref\PowerDial.dll
 C:\Users\hp\Desktop\control-battery\src\PowerDial\obj\Release\net10.0-windows\win-x64\PowerDial.sourcelink.json
+C:\Users\hp\Desktop\control-battery\src\PowerDial\bin\Release\net10.0-windows\win-x64\mscordaccore_amd64_amd64_10.0.1226.42308.dll

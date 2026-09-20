@@ -1,6 +1,0 @@
-C:\Users\hp\Desktop\control-battery\PowerDial.exe
-C:\Users\hp\Desktop\control-battery\PowerDial.dll
-C:\Users\hp\Desktop\control-battery\PowerDial.deps.json
-C:\Users\hp\Desktop\control-battery\PowerDial.runtimeconfig.json
-C:\Users\hp\Desktop\control-battery\System.Management.dll
-C:\Users\hp\Desktop\control-battery\runtimes\win\lib\net6.0\System.Management.dll

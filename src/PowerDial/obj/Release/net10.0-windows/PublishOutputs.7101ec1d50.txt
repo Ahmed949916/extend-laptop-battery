@@ -1,6 +1,0 @@
-C:\Users\hp\AppData\Local\Temp\pd-publish\PowerDial.exe
-C:\Users\hp\AppData\Local\Temp\pd-publish\PowerDial.dll
-C:\Users\hp\AppData\Local\Temp\pd-publish\PowerDial.deps.json
-C:\Users\hp\AppData\Local\Temp\pd-publish\PowerDial.runtimeconfig.json
-C:\Users\hp\AppData\Local\Temp\pd-publish\System.Management.dll
-C:\Users\hp\AppData\Local\Temp\pd-publish\runtimes\win\lib\net10.0\System.Management.dll

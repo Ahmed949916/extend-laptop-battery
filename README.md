@@ -12,6 +12,13 @@ never see a watt figure borrowed from someone else's machine.
 
 On a desktop the battery panels stand down and the rest carries on.
 
+![Overview](docs/overview.png)
+
+*Overview. Every number on it was measured on the machine it is running on - the charge and
+health from the battery itself, the draw timed from its energy counter, the processor time
+sampled per process. The two settings worth changing are named, with one button that
+changes them.*
+
 ## Run it
 
 Double-click `PowerDial.exe` in this folder, or the shortcut if you made one.
@@ -31,6 +38,13 @@ The battery stated once; the single most worthwhile change with a button that ma
 what your current settings are worth against the ones this laptop started with; the mode in
 effect; and what is keeping the processor busy.
 
+![Power modes](docs/power-modes.png)
+
+*Power modes. The mode in effect carries a tick, a badge and a heavier border, and its
+button is gone - there is nothing to apply. Each card shows what it drew here and over how
+many minutes; a mode with too little recorded says so rather than showing a figure it has
+not earned.*
+
 **Power modes** - five cards, each stating the trade in a sentence, listing what it
 actually changes, and showing what it measured **here**. *Max battery*, *Battery saver*,
 *Balanced*, *Performance*, and **Original settings** - how this laptop was set up before
@@ -39,16 +53,41 @@ is a profile like any other: you can pick it, it lights up when you are on it, a
 recorded while you are get grouped under it, which is what makes the comparison on Overview
 and Insights possible at all.
 
+![Insights](docs/insights.png)
+
+*Insights. The comparison at the top is two measured averages, not a projection - and when
+the change made things worse it says so, including the likeliest reason. The ranking below
+scales every bar against the thirstiest mode, colours only the cheapest and the dearest,
+and states the span the recording covers.*
+
 **Insights** - what your last change was worth, in watts and in hours per charge; what each
 mode has cost, ranked, with the span the recording covers; the draw and charge charts; the
 apps using the most power; and the cumulative per-process tally across every session.
 
+![Advanced](docs/advanced.png)
+
+*Advanced. Every setting carries an info icon explaining what it does, what it costs, and
+which of its numbers were measured rather than assumed. Four of the ten are ones Windows
+hides from its own Power Options.*
+
 **Advanced** - every individual power setting with what it does and what it costs, plus the
 full list of what is worth changing.
+
+![Battery health](docs/battery-health.png)
+
+*Battery health. Its own page because it is a fact about the hardware rather than a record
+of your usage, it moves over months rather than minutes, and nothing in the app can act on
+it.*
 
 **Battery health** - how much charge the pack still holds against what it shipped with, and
 the one honest thing there is to say about wear: nothing in this app or in Windows gives
 back capacity that is already gone.
+
+![Diagnostics](docs/diagnostics.png)
+
+*Diagnostics. Both sections stay collapsed because on most machines the answer is "nothing
+is wrong" - the GPU watch usually finds nothing to report, and if you have never seen the
+activity log, nothing has failed.*
 
 **Diagnostics** - the GPU watch, the activity log, and **Run as admin** for the few settings
 that need it.
@@ -67,7 +106,9 @@ there is not enough recorded yet it says so instead of guessing.
       README.md                 this file
       CLAUDE.md                 the working brief for changing it
       scripts\publish.ps1       build, replace PowerDial.exe, start it
+      scripts\shots.ps1         recapture the screenshots in this README
       scripts\sign.ps1          Authenticode signing
+      docs\                     the screenshots
       src\PowerDial\            source
       src\PowerDial-selftest\   read-only checks against the live machine
 
@@ -106,6 +147,21 @@ double-click is the published single file at the root, and that only changes whe
 publish - so building and then running the old exe looks exactly like a change that did
 nothing. Use the script.
 
+### Screenshots
+
+The images above are captured from a running copy, so they go stale the moment the
+interface changes:
+
+    .\scripts\shots.ps1
+
+It prompts once per page - switch PowerDial to the page it names, press Enter - and writes
+`docs\<page>.png`. It captures the app's own window rather than the screen, using
+`DwmGetWindowAttribute` rather than `GetWindowRect`: on Windows 10 and 11 a window's real
+rectangle includes several pixels of invisible resize border, which is what puts a dark
+margin down each side of a naively captured shot. Maximise the window first for wide shots,
+and be on battery - plugged in, half the figures correctly report that there is nothing to
+measure.
+
 ### Signing
 
 The portable copy is Authenticode-signed in place, so sign it *after* copying it out:
@@ -140,9 +196,15 @@ battery's own energy counter over a 60-second window. That means:
   reflects the new state instead of averaging across the change
 
 **Profiles.** Longest / Endurance / Balanced / Full speed - shown as *Max battery* /
-*Battery saver* / *Balanced* / *Performance*. *Balanced* is the configuration that actually
-measured **6.92 W (6h21m)** here. All of them write the **on-battery side only**; a profile
-never touches plugged-in behaviour.
+*Battery saver* / *Balanced* / *Performance*. All of them write the **on-battery side
+only**; a profile never touches plugged-in behaviour.
+
+Which one is cheapest is not a question this file can answer, and it deliberately does not
+try - an earlier version of it quoted a figure from one tuning session that the app's own
+recording now contradicts. *What each mode has cost you* on Insights is the answer, measured
+on your machine, and it can be surprising: *Performance* often beats *Balanced* outright,
+because boost finishing a burst quickly returns the CPU to idle sooner, and idle is where
+the savings are. That is the whole reason the app measures instead of asserting.
 
 **Original settings.** A fifth profile, and the way back. It is how this laptop was set up
 before PowerDial wrote anything: the snapshot is taken on first run, before the UI is

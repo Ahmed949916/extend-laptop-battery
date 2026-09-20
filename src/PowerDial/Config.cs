@@ -28,7 +28,10 @@ namespace PowerDial
 
         /// <summary>"basic" or "advanced". Basic is the default: someone opening this for the
         /// first time wants their battery to last longer, not a registry editor.</summary>
-        public string Mode { get; set; }
+        /// <summary>Sidebar section last open - "overview", "modes", "insights",
+        /// "advanced" or "diagnostics". Empty on a config written before the sidebar
+        /// existed, which reads as Overview.</summary>
+        public string Section { get; set; }
 
         // What the machine was drawing before the last optimise, so the app can say what the
         // change was actually worth. Both sides are measured on this PC - nothing here is a
@@ -108,13 +111,23 @@ namespace PowerDial
             Save();
         }
 
-        public static void SetMode(string mode)
+        /// <summary>
+        /// Remember which sidebar section was open, so the app reopens where it was left.
+        ///
+        /// This replaced a basic/advanced mode flag. The two modes decided what existed;
+        /// a section only decides what is on screen, and everything stays reachable from
+        /// the sidebar either way, so there is no longer a setting that hides features.
+        /// </summary>
+        public static void SetSection(string key)
         {
-            Current.Mode = mode == "advanced" ? "advanced" : "basic";
+            Current.Section = string.IsNullOrEmpty(key) ? "overview" : key;
             Save();
         }
 
-        public static bool IsBasic { get { return Current.Mode != "advanced"; } }
+        public static string CurrentSection
+        {
+            get { return string.IsNullOrEmpty(Current.Section) ? "overview" : Current.Section; }
+        }
 
         public static void SetGpuWake(double watts)
         {

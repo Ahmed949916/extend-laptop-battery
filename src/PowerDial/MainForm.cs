@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -14,6 +14,7 @@ namespace PowerDial
         const int W = 648;          // design width of the content column
         const int WMax = 1240;      // past this a chart is wider, not clearer
         const int Chrome = 14;      // gutter either side of the column
+        const int Rail = 240;       // the sidebar, which every other measurement sits beside
         const int SideCol = 340;    // x of the plugged-in column in a settings row
 
         sealed class Row
@@ -39,21 +40,30 @@ namespace PowerDial
         SteadyPanel _root;
         Panel _chrome;              // header + watts strip + section bar, pinned above the scroll
         Card _wattsStrip;           // "Where your watts go", pinned so it never scrolls away
-        Card _basicCard;            // the whole of Basic mode
-        Panel _modesPanel;          // holds the Basic mode row - resized alongside _basicCard
-        PillButton _btnBasic, _btnAdvanced, _btnOptimise;
-        Label _basicState, _basicSaved, _basicStats, _basicNow;
-        Panel _modeTable;                              // measured cost of each mode
-        List<ModeStat> _modeStats = new List<ModeStat>();   // prepared in RefreshBasic, drawn in paint
-        readonly List<PillButton> _modeBtns = new List<PillButton>();
+        SavingCard _cardSaving;     // Insights: what the last change was actually worth
+        ModeCostCard _cardModeCost; // Insights: what each mode has cost, measured
+        Card _cardHealth;           // Battery health, its own page
+        Card _cardHealthAdvice;     // and the one honest thing to say about wear
+        Label _healthPct;           // the headline percentage
+        StatusCard _cardStatus;     // Overview: the battery, stated once
+        AdviceCard _cardAdvice;     // Overview: the one thing worth doing
+        ModeSummaryCard _cardMode;  // Overview: which mode is in effect
+        TopAppsCard _cardApps;      // Overview: what is keeping the processor busy
+        Panel _overviewPair;        // holds the mode and apps cards side by side
+        PageTitle _pageTitle;       // the name of the section on screen
+        readonly List<ModeCard> _modeCards = new List<ModeCard>();
+        Panel _profileRow;          // the old row of four identical buttons, now retired
+        Panel _bottomPad;           // the floor under the last card, on every page
+        Suggestion _adviceFix;      // what the Overview primary button acts on, if anything
+
+        NavRail _nav;               // the sidebar - the app's one navigation model
+        StatusBlock _status;        // battery summary pinned to the foot of the sidebar
+        string _page = "overview";  // which section is on screen
 
         /// <summary>Preset.Code of the profile the machine currently matches, 0 for custom.
         /// Read from the machine after any change, and written into every history point.</summary>
         int _modeCode;
         Label _wattsTotal;          // the measured figure the list is describing
-        Panel _navBar;
-        readonly List<PillButton> _navBtns = new List<PillButton>();
-        readonly List<Control> _navTargets = new List<Control>();
         readonly Dictionary<string, Control> _sections = new Dictionary<string, Control>();
         Readout _readout;
         Sparkline _spark;
@@ -114,6 +124,8 @@ namespace PowerDial
         bool _bgOnly = true;
         DateTime _lastHistory = DateTime.MinValue;
         PillButton _adminBtn;
+        Panel _adminBox;            // the Run as admin button and the line explaining it
+        bool _elevated;             // read once: it cannot change without a restart
         readonly List<PillButton> _presetBtns = new List<PillButton>();
 
         NotifyIcon _tray;
@@ -138,8 +150,14 @@ namespace PowerDial
             ForeColor = Theme.Text;
             Font = Theme.Body;
             StartPosition = FormStartPosition.CenterScreen;
+
+            // The manifest declares this app PerMonitorV2 aware, which tells Windows not to
+            // bitmap-scale it because the app scales itself. It did not, so on any display
+            // above 100% the whole interface rendered too small. Point-sized fonts in
+            // Theme.cs handle the text; this is what scales the control bounds around it.
+            AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(980, 900);
-            MinimumSize = new Size(W + 34, 520);
+            MinimumSize = new Size(W + Rail + 34, 560);
             Icon = MakeIcon();
             DoubleBuffered = true;
 
@@ -212,7 +230,7 @@ namespace PowerDial
             if (pruned > 0) Log("Cleared " + pruned + " history file(s) older than " + History.KeepMonths + " months.");
 
             Log("Watching " + PowerCfg.ActiveSchemeName() +
-                (PowerCfg.IsElevated() ? ", running as admin." : ", not running as admin."));
+                (_elevated ? ", running as admin." : ", not running as admin."));
             if (cap != null) Log(cap);
             if (acCap != null) Log(acCap);
             Log(Machine.Summary());
@@ -240,7 +258,7 @@ namespace PowerDial
             if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
             Rectangle work = Screen.FromControl(this).WorkingArea;
             int maxH = work.Height - 90;
-            int wantW = Math.Min(WMax + 34, Math.Max(W + 34, (int)(work.Width * 0.62)));
+            int wantW = Math.Min(WMax + Rail + 34, Math.Max(W + Rail + 34, (int)(work.Width * 0.68)));
             ClientSize = new Size(wantW, Math.Min(940, Math.Max(520, maxH)));
             CenterToScreen();
             Relayout();
@@ -261,6 +279,23 @@ namespace PowerDial
         {
             base.OnClientSizeChanged(e);
             Relayout();
+        }
+
+        /// <summary>
+        /// Light the focus rings, because the keyboard is being used to move around.
+        ///
+        /// Control.Focused is just as true after a mouse click, and a ring drawn on every
+        /// click is one people learn to ignore - CSS solves this with :focus-visible and
+        /// WinForms has no equivalent. Tab and the arrows are handled here rather than in
+        /// each widget because they never reach a control's OnKeyDown: the form consumes
+        /// them as navigation before the control ever sees them.
+        /// </summary>
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            Keys k = keyData & Keys.KeyCode;
+            if (k == Keys.Tab || k == Keys.Left || k == Keys.Right || k == Keys.Up || k == Keys.Down)
+                Theme.KeyboardNav = true;
+            return base.ProcessDialogKey(keyData);
         }
 
         // ================================================================= layout
@@ -290,7 +325,7 @@ namespace PowerDial
             // one flick of the wheel and you had to come back up to read the effect of
             // whatever you had just changed.
             _readout = new Readout {
-                Location = new Point(Chrome, 12), Width = W, Height = 170,
+                Location = new Point(Chrome, 12), Width = W, Height = 180,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _spark = new Sparkline {
@@ -340,13 +375,13 @@ namespace PowerDial
             };
             _fixApplyAll = new PillButton {
                 Text = "Apply every fix", Glyph = Theme.GlyphCheck, Location = new Point(0, 3),
-                Size = new Size(160, 32), Primary = true, BackColor = Theme.Panel
+                Size = new Size(176, 36), Primary = true, BackColor = Theme.Panel
             };
             _fixApplyAll.Click += (s, e) => ApplyAllFixes();
             _fixButtons.Controls.Add(_fixApplyAll);
             _fixRecheck = new PillButton {
-                Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(168, 3),
-                Size = new Size(126, 32), BackColor = Theme.Panel
+                Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(186, 3),
+                Size = new Size(140, 36), BackColor = Theme.Panel
             };
             _fixRecheck.Click += (s, e) => RunBusy(_fixRecheck, delegate {
                 LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); });
@@ -368,14 +403,16 @@ namespace PowerDial
                 "Every profile writes the on-battery side only. What happens when you are plugged " +
                 "in is never touched, which is what made all of this safe to experiment with."));
 
-            Panel profiles = new Panel { Width = W, Height = 40, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 8) };
-            _presetBtns.AddRange(BuildProfileRow(profiles, Presets.All, 36, (p, b) => WriteProfile(p, b)));
-            _root.Controls.Add(profiles);
+            _profileRow = new Panel { Width = W, Height = 40, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 8) };
+            _presetBtns.AddRange(BuildProfileRow(_profileRow, Presets.All, 36, (p, b) => WriteProfile(p, b)));
+            _root.Controls.Add(_profileRow);
 
             Panel restoreRow = new Panel { Width = W, Height = 38, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 2) };
             _btnRestore = new PillButton {
                 Text = "Restore original settings", Glyph = Theme.GlyphUndo,
-                Location = new Point(0, 0), Size = new Size(232, 36), Primary = true
+                // Not Primary: putting the filled accent on Restore made undo look like
+                // the main thing to do here, ahead of the profiles the section is for.
+                Location = new Point(0, 0), Size = new Size(256, 38)
             };
             _btnRestore.Click += (s, e) => RestoreBaseline();
             restoreRow.Controls.Add(_btnRestore);
@@ -387,14 +424,6 @@ namespace PowerDial
                 Margin = new Padding(2, 2, 0, 10), BackColor = Theme.Ink
             };
             _root.Controls.Add(profileNote);
-
-            _adminBtn = new PillButton {
-                Text = "Run as admin", Glyph = Theme.GlyphShield, Width = 150, Height = 32,
-                Margin = new Padding(0, 0, 0, 10), Visible = false
-            };
-            _adminBtn.Click += (s, e) => RelaunchElevated();
-            _root.Controls.Add(_adminBtn);
-            if (!PowerCfg.IsElevated()) _adminBtn.Visible = true;
 
 
             // ---------------------------------------------------------- impact knobs
@@ -445,7 +474,7 @@ namespace PowerDial
             _root.Controls.Add(_basicBox);
 
             // ---------------------------------------------------------- analytics
-            _root.Controls.Add(Heading("Analytics", "recorded here, kept on disk",
+            _root.Controls.Add(Accent(Heading("Analytics", "recorded here, kept on disk",
                 "Everything in this section is measured on this PC and written to " +
                 "%LOCALAPPDATA%\\PowerDial\\history, one line a minute, so it survives restarts " +
                 "instead of starting from nothing every launch.\n\n" +
@@ -455,12 +484,17 @@ namespace PowerDial
                 "began is the cumulative tally - the process that has actually burned the most CPU " +
                 "across every session, which is the one costing you runtime.\n\n" +
                 "Background means no instance of it owns a visible window. Those are the ones worth " +
-                "questioning, because you are not the one using them."));
+                "questioning, because you are not the one using them.")));
+
+            // Built here rather than appended later: the column is a flow panel, so child
+            // order is layout order, and these two are the answer to "did it work" and
+            // "which mode should I use" - the questions Insights exists for.
+            BuildInsightsHeadline();
 
             Card ac = new Card { Width = W, Height = 352, Margin = new Padding(0, 0, 0, 10) };
             ac.Controls.Add(new Label {
                 Text = "Power draw", Location = new Point(14, 10), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
 
             // How far back to look. Both charts move together - they are stacked and read
             // against each other, so showing six hours of watts beside a day of charge
@@ -489,7 +523,7 @@ namespace PowerDial
             ac.Controls.Add(_chartWatts);
             ac.Controls.Add(new Label {
                 Text = "Charge over time", Location = new Point(14, 168), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
             _batChart = new BatteryChart {
                 Location = new Point(14, 190), Size = new Size(W - 30, 104), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             ac.Controls.Add(_batChart);
@@ -501,8 +535,8 @@ namespace PowerDial
 
             Card pc = new Card { Width = W, Height = 292, Margin = new Padding(0, 0, 0, 10) };
             _procLabel = new Label {
-                Text = "Running now", Location = new Point(14, 10), Size = new Size(300, 18),
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel };
+                Text = "Apps using the most power", Location = new Point(14, 10), Size = new Size(300, 18),
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel };
             pc.Controls.Add(_procLabel);
             _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 400, 6), Size = new Size(98, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
             _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 296, 6), Size = new Size(80, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
@@ -540,7 +574,7 @@ namespace PowerDial
             Card oc = new Card { Width = W, Height = 216, Margin = new Padding(0, 0, 0, 10) };
             oc.Controls.Add(new Label {
                 Text = "Since recording began", Location = new Point(14, 10), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
             oc.Controls.Add(new Label {
                 Text = "cumulative CPU time across every session", Location = new Point(176, 13),
                 AutoSize = true, Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel });
@@ -570,19 +604,53 @@ namespace PowerDial
             oc.Controls.Add(_offTable);
             _root.Controls.Add(oc);
 
-            Card hc = new Card { Width = W, Height = 104, Margin = new Padding(0, 0, 0, 10) };
+            // Battery health is not an insight about your usage - it is a fact about the
+            // hardware, it changes over months rather than minutes, and nothing in this app
+            // can act on it. It gets its own page rather than a footnote under the charts.
+            Card hc = new Card { Width = W, Height = 188, Margin = new Padding(0, 0, 0, 10) };
+            _cardHealth = hc;
             hc.Controls.Add(new Label {
-                Text = "Battery health", Location = new Point(14, 10), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+                Text = "How much charge it still holds", Location = new Point(14, 12), AutoSize = true,
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
+
+            // The figure first, in the size the figure deserves. It was a clause in the
+            // middle of a 12px grey sentence, which is not how you state the one number on
+            // the page.
+            _healthPct = new Label {
+                Location = new Point(14, 42), Size = new Size(W - 30, 34),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Stat, ForeColor = Theme.Text, BackColor = Theme.Panel };
+            hc.Controls.Add(_healthPct);
+
             _barHealth = new StackBar {
-                Location = new Point(14, 34), Size = new Size(W - 30, 44), Unit = "Wh", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Empty = "capacity not readable" };
+                Location = new Point(14, 88), Size = new Size(W - 30, 44), Unit = "Wh",
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Empty = "Windows does not report this battery's capacity on this PC." };
             hc.Controls.Add(_barHealth);
             _healthNote = new Label {
-                Location = new Point(14, 80), Size = new Size(W - 30, 18), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(14, 136), Size = new Size(W - 30, 40),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             hc.Controls.Add(_healthNote);
             _root.Controls.Add(hc);
+
+            // Wear is permanent, so the page says so once rather than implying a setting
+            // somewhere could undo it.
+            Card hw = new Card { Width = W, Height = 162, Margin = new Padding(0, 0, 0, 10) };
+            _cardHealthAdvice = hw;
+            hw.Controls.Add(new Label {
+                Text = "What you can do about it", Location = new Point(14, 12), AutoSize = true,
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
+            hw.Controls.Add(new Label {
+                Text = "Nothing in this app, or in Windows, can give back capacity a battery has " +
+                       "already lost - so nothing here pretends to. What slows further wear is " +
+                       "ordinary care: keep it off the charger at 100% for days at a time, and keep " +
+                       "it out of the heat. Everything else on these pages is about drawing less " +
+                       "from the capacity you still have.",
+                Location = new Point(14, 42), Size = new Size(W - 30, 108),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Body, ForeColor = Theme.Dim, BackColor = Theme.Panel });
+            _root.Controls.Add(hw);
 
             // ---------------------------------------------------------- more
             // Both of these are collapsed and neither is needed on a normal day, so they
@@ -611,7 +679,6 @@ namespace PowerDial
             _watchToggle.Toggled += (s, e) => {
                 _watchBox.Visible = _watchToggle.Expanded;
                 _root.PerformLayout();
-                MarkNav();
             };
             _root.Controls.Add(WithInfo(_watchToggle, "GPU watch",
                 "On a laptop with both integrated and discrete graphics, the discrete GPU is meant to " +
@@ -650,7 +717,7 @@ namespace PowerDial
             _watchButtons = new Panel {
                 Location = new Point(14, 228), Size = new Size(W - 30, 38), BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(0, 3), Size = new Size(126, 32) };
+            PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(0, 3), Size = new Size(140, 36) };
             recheck.Click += (s, e) => RunBusy(recheck, delegate {
                 RefreshWatch(); Log("Re-checked what could be waking the GPU."); });
             _watchButtons.Controls.Add(recheck);
@@ -685,23 +752,119 @@ namespace PowerDial
             _logBox.Controls.Add(_log);
             _root.Controls.Add(_logBox);
 
-            // breathing room so the last section is not flush against the window edge
-            _root.Controls.Add(new Panel {
-                Width = W, Height = 30, BackColor = Theme.Ink, Margin = new Padding(0)
+            // ---------------------------------------------------------- run as admin
+            // It used to sit under Restore on Power modes, which is nowhere near anything
+            // that mentions it. When a write needs rights the app does not have, PowerCfg
+            // returns "needs administrator - use Run as admin", and that sentence is read
+            // in the log immediately above this button. The instruction and the thing it
+            // instructs you to press are now on the same page.
+            //
+            // Tagged by TagSections as part of the Activity section, so it follows the log
+            // onto Diagnostics; it does not follow the log's collapse, because a button you
+            // are being told to press should not be hidden behind a chevron.
+            _elevated = PowerCfg.IsElevated();
+            _adminBox = new Panel {
+                Width = W, Height = 78, BackColor = Theme.Ink,
+                Margin = new Padding(0, 12, 0, 0), Visible = false
+            };
+            _adminBox.Controls.Add(new Label {
+                Text = "A few Windows power settings can only be written by an administrator.",
+                Location = new Point(2, 0), Size = new Size(W - 24, 22),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Ink
             });
 
-            // built last: every section has to exist before the bar can point at them
-            BuildModeSwitch();
-            BuildBasicCard();
-            TagSections();
-            BuildWattsStrip();
-            BuildNav();
-            // Scrolled covers the wheel as well as the scrollbar - the stock Scroll event
-            // does not, so the strip used to go stale the moment anyone spun the wheel
-            _root.Scrolled += (s, e) => MarkNav();
+            // No glyph: the icon font is not on every install, and a button whose label is
+            // preceded by an empty square is a button people do not press.
+            _adminBtn = new PillButton {
+                Text = "Run as admin", Location = new Point(0, 28), Width = 168, Height = 36,
+                BackColor = Theme.Ink
+            };
+            _adminBtn.Click += (s, e) => RelaunchElevated();
+            _adminBox.Controls.Add(_adminBtn);
 
-            // Everything exists now, so the saved mode can decide what is on screen.
-            ApplyMode();
+            // Restarting an app is not a small thing to ask, and "admin" is the vaguest
+            // word in the interface. The one line above says what it needs; the dot says
+            // why, when, and what it costs - the same bargain every other section makes.
+            _adminBox.Controls.Add(new InfoDot {
+                Location = new Point(176, 36), BackColor = Theme.Ink,
+                Heading = "Run as admin",
+                Body = "Most of what this app changes is written to your own user settings, which " +
+                       "needs no special rights. A few of them belong to the power scheme itself, " +
+                       "and Windows refuses those unless the app is running as an administrator.\n\n" +
+                       "When that happens the Activity log above says \"needs administrator - use " +
+                       "Run as admin\" rather than claiming the change worked. This button is the " +
+                       "answer to that message, and if nothing in the log has asked for it, you do " +
+                       "not need it.\n\n" +
+                       "It starts a second copy of PowerDial with those rights - which is what makes " +
+                       "Windows show you the confirmation prompt - and closes this one. Settings, " +
+                       "history and the measured record are all on disk, so the restart loses " +
+                       "nothing but the current measuring window.\n\n" +
+                       "One consequence worth knowing: once it is running elevated, a normal " +
+                       "command prompt can no longer close it. Use its own window or the tray icon."
+            });
+            _root.Controls.Add(_adminBox);
+
+            // Breathing room under the last card. It used to be tagged with whichever
+            // section happened to be last in the column, so only that one page had a floor
+            // and every other ended flush against the window edge.
+            _bottomPad = new Panel {
+                Width = W, Height = 36, BackColor = Theme.Ink, Margin = new Padding(0)
+            };
+            _root.Controls.Add(_bottomPad);
+
+            // built last: every section has to exist before the sidebar can show one
+            BuildOverview();
+            BuildPowerModes();
+            TagSections();
+
+            // TagSections gives everything between the Analytics heading and the next one
+            // to Insights, which is right for all of it except the health card - that is a
+            // fact about the hardware rather than a record of your usage, and it has its
+            // own page. Retagging it here keeps the build order (and so the layout order)
+            // of the column alone.
+            if (_cardHealth != null) _cardHealth.Tag = "Battery health";
+            if (_cardHealthAdvice != null) _cardHealthAdvice.Tag = "Battery health";
+            foreach (ModeCard mc in _modeCards) mc.Tag = "Profiles";
+
+            // The cards go where the button row was, above Restore - a flow panel lays its
+            // children out in child order, and they were appended at the end of the column.
+            Control profHead;
+            if (_sections.TryGetValue("Profiles", out profHead) && profHead != null)
+            {
+                int at = _root.Controls.GetChildIndex(profHead) + 1;
+                for (int i = 0; i < _modeCards.Count; i++)
+                    _root.Controls.SetChildIndex(_modeCards[i], at + i);
+            }
+
+            // Four identical buttons said nothing about what any of them would do. The
+            // cards replace them; the buttons stay built because RefreshModeCode lights
+            // whichever one the machine matches, and nothing else needs changing for that.
+            if (_profileRow != null) { _profileRow.Visible = false; _profileRow.Height = 0; }
+
+            // Each page now carries its own title, so the heading that used to introduce
+            // the section inside the column says the same thing twice. They stay in the
+            // tree because TagSections uses them as the section boundaries.
+            // Only the ones that now repeat the page title, or that said nothing to begin
+            // with. Advanced holds two distinct groups - what is worth changing, and the
+            // settings themselves - and without their headings it was one long stream of
+            // cards with nothing separating them.
+            string[] replaced = { "Profiles", "Analytics", "More" };
+            foreach (string name in replaced)
+            {
+                Control head;
+                if (_sections.TryGetValue(name, out head) && head != null)
+                { head.Visible = false; head.Height = 0; }
+            }
+            BuildWattsStrip();
+            BuildRail();
+
+            // Overview every time, not the section you happened to close on. Overview is
+            // the page that answers "is anything wrong and what should I do" in one screen;
+            // reopening on Diagnostics because that is where you were last Tuesday starts
+            // you three clicks from the answer. The section is still recorded as you move,
+            // so the setting is there if this is ever worth making a preference.
+            ShowPage("overview");
         }
 
         /// <summary>
@@ -725,57 +888,160 @@ namespace PowerDial
         }
 
         /// <summary>
-        /// Show only what the chosen mode needs.
+        /// Which sidebar section a heading belongs to.
         ///
-        /// Basic is one card: a button that does the sensible thing, and what it was worth.
-        /// Advanced is the whole instrument. Sections are hidden rather than unbuilt, so
-        /// switching back is instant and nothing has to be reconstructed.
+        /// The column is still one flow of cards tagged by TagSections; this is the only
+        /// thing that decides which of them a section shows. Adding a section means adding
+        /// its heading here - a heading with no entry falls to Overview rather than
+        /// vanishing, because a card nobody can reach is worse than one in the wrong place.
         /// </summary>
-        void ApplyMode()
+        static string PageOf(string section)
         {
-            bool basic = Config.IsBasic;
+            switch (section)
+            {
+                case "Profiles":                return "modes";
+                case "Analytics":               return "insights";
+                case "Battery health":          return "health";
+                case "What changes your watts": return "advanced";
+                case "More":                    return "diagnostics";
 
-            _btnBasic.Selected = basic;
-            _btnAdvanced.Selected = !basic;
-            _btnBasic.Invalidate(); _btnAdvanced.Invalidate();
+                // WithInfo registers a section for every collapsible toggle as well as for
+                // the headings, so these three are section names too. Without them they hit
+                // the default and everything after each one landed on Overview - which is
+                // why Diagnostics came up empty with only its heading on it.
+                case "Basic settings":          return "advanced";
+                case "GPU watch":               return "diagnostics";
+                case "Activity":                return "diagnostics";
+
+                // The suggestion list is the detailed version of what the Overview card
+                // recommends. One recommendation up front, the full list with the rest of
+                // the settings it is talking about.
+                case "Make it last longer":     return "advanced";
+
+                default:                        return "overview";
+            }
+        }
+
+        /// <summary>
+        /// Show one section of the app.
+        ///
+        /// This replaced ApplyMode, which chose between a Basic card and the whole
+        /// instrument. The mechanism is the same one, and deliberately so: sections are
+        /// hidden rather than unbuilt, so switching is instant and nothing is reconstructed.
+        /// What changed is what decides - the sidebar, rather than a mode that hid features.
+        /// </summary>
+        void ShowPage(string key)
+        {
+            if (string.IsNullOrEmpty(key)) key = "overview";
+            _page = key;
+            if (_nav != null) _nav.Select(key);
+
+            SetTitle(key);
 
             foreach (Control c in _root.Controls)
             {
-                if (c == _basicCard) { c.Visible = basic; continue; }
+                if (c == null) continue;
 
-                // Three of these are the bodies of collapsible sections, and they are
-                // collapsed by default. Showing the column must not force them open: doing
-                // that left the chevron reading "collapsed" over an expanded section, and
-                // dumped the settings, the GPU watch and the log on someone who had never
-                // asked for them. In Advanced they follow their own toggle.
-                if (c == _basicBox) { c.Visible = !basic && _basicToggle.Expanded; continue; }
-                if (c == _watchBox) { c.Visible = !basic && _watchToggle.Expanded; continue; }
-                if (c == _logBox) { c.Visible = !basic && _logToggle.Expanded; continue; }
+                // The title names whichever page is open, so it is the one thing in the
+                // column that is never hidden.
+                if (c == _pageTitle || c == _bottomPad) { c.Visible = true; continue; }
 
-                c.Visible = !basic;
+                // The Overview cards are inserted above the first heading, so TagSections
+                // leaves them untagged - and untagged falls to Overview, which is where
+                // they belong.
+                bool on = PageOf(c.Tag as string) == key;
+
+                // Already running as admin? Then the offer is not merely redundant, it is
+                // wrong - pressing it would restart the app to grant rights it already has.
+                // It was hidden once at build time before, which ShowPage then undid on the
+                // next page change by setting Visible from the tag alone.
+                if (c == _adminBox) on = on && !_elevated;
+
+                // The collapsible bodies follow their own toggle. Opening a section must
+                // not fling them open: doing that left the chevron reading "collapsed" over
+                // an expanded section, and dumped the settings, the GPU watch and the log
+                // on someone who had never asked for them.
+                else if (c == _basicBox) on = on && _basicToggle.Expanded;
+                else if (c == _watchBox) on = on && _watchToggle.Expanded;
+                else if (c == _logBox) on = on && _logToggle.Expanded;
+
+                c.Visible = on;
             }
 
-            // The watts strip and the section bar are the advanced instrument; in basic mode
-            // the header alone carries the numbers, and the chrome shrinks to match.
-            _wattsStrip.Visible = !basic;
-            _navBar.Visible = !basic;
-            _navBar.Location = new Point(_navBar.Left, basic ? _readout.Bottom + 10 : _wattsStrip.Bottom + 10);
-            _chrome.Height = (basic ? _readout.Bottom : _navBar.Bottom) + 10;
+            // The header instrument and the watts strip each describe a measurement, and
+            // each belongs to the section that is about it - pinned over every page they
+            // cost ~300px of permanent chrome on sections with nothing to do with either.
+            // The header instrument is gone: StatusCard says all of this on Overview, and
+            // the two together stated the charge, the draw and the time left twice on the
+            // same screen. It stays built because the measuring countdown and the sparkline
+            // still live on it; it is simply never shown.
+            // Both are retired rather than removed. The header instrument is said better
+            // by StatusCard on Overview; the watts strip ranked processes over the measured
+            // window, which the Overview card now summarises and the Insights table states
+            // in full - pinned over Insights it was the third telling of one measurement.
+            // They stay built because the measuring countdown, the sparkline and the window
+            // ranking still feed other cards.
+            _readout.Visible = false;
+            _wattsStrip.Visible = false;
+            _chrome.Height = 0;      // nothing is pinned above the column any more
 
-            _root.Location = new Point(0, _chrome.Height);
-            _root.Size = new Size(ClientSize.Width, Math.Max(80, ClientSize.Height - _chrome.Height));
+            _root.Location = new Point(Rail, _chrome.Height);
+            _root.Size = new Size(Math.Max(80, ClientSize.Width - Rail),
+                                  Math.Max(80, ClientSize.Height - _chrome.Height));
 
-            if (basic) RefreshBasic();
+            if (key == "overview") RefreshOverview();
+            else if (key == "modes") RefreshModes();
+            else if (key == "insights") RefreshBasic();
+            else if (key == "health") RefreshAnalytics();
             Relayout();
         }
 
-        void SetMode(string mode)
+        /// <summary>The page title, and the sentence under it.</summary>
+        void SetTitle(string key)
         {
-            Config.SetMode(mode);
-            ApplyMode();
-            Log(Config.IsBasic
-                ? "Switched to Basic - one button, and what it was worth."
-                : "Switched to Advanced - every setting and every measurement.");
+            if (_pageTitle == null) return;
+            switch (key)
+            {
+                case "modes":
+                    _pageTitle.Title = "Power modes";
+                    _pageTitle.Subtitle = "Each one changes how hard the processor works and how " +
+                                          "quickly the screen sleeps. These apply on battery only.";
+                    break;
+                case "insights":
+                    _pageTitle.Title = "Insights";
+                    _pageTitle.Subtitle = "What your changes were worth, and what this laptop has " +
+                                          "actually drawn. Recorded once a minute, kept on disk.";
+                    break;
+                case "health":
+                    _pageTitle.Title = "Battery health";
+                    _pageTitle.Subtitle = "How much charge this battery still holds compared with " +
+                                          "when it was new. Read from the hardware.";
+                    break;
+                case "advanced":
+                    _pageTitle.Title = "Advanced";
+                    _pageTitle.Subtitle = "Individual Windows power settings, and everything this app " +
+                                          "found worth changing.";
+                    break;
+                case "diagnostics":
+                    _pageTitle.Title = "Diagnostics";
+                    _pageTitle.Subtitle = "Detail for troubleshooting. Nothing here needs your " +
+                                          "attention day to day.";
+                    break;
+                default:
+                    _pageTitle.Title = "Overview";
+                    _pageTitle.Subtitle = "";
+                    break;
+            }
+            _pageTitle.AccessibleName = _pageTitle.Title;
+            _pageTitle.Height = _pageTitle.Subtitle.Length > 0 ? 82 : 58;
+            _pageTitle.Invalidate();
+        }
+
+        void SetPage(string key)
+        {
+            if (key == _page) return;
+            Config.SetSection(key);
+            ShowPage(key);
         }
 
         /// <summary>
@@ -804,92 +1070,341 @@ namespace PowerDial
         /// minutes have accumulated afterwards it says so rather than showing a number.
         /// </summary>
         /// <summary>
-        /// Basic / Advanced. Basic is the default because someone opening this for the first
-        /// time wants a longer-lasting laptop, not a registry editor; Advanced is the whole
-        /// instrument and is one click away. The choice is remembered.
+        /// The sidebar, and the battery summary under it.
+        ///
+        /// It replaces two strips that looked identical and did different things: a
+        /// Basic/Advanced switch that decided what existed, and a section bar three hundred
+        /// pixels below it that only scrolled. One list now, and nothing is hidden behind a
+        /// mode - every section is one click away from every other.
         /// </summary>
-        void BuildModeSwitch()
+        void BuildRail()
         {
-            _btnBasic = new PillButton {
-                Text = "Basic", Tab = true, Size = new Size(74, 26), BackColor = Theme.Ink,
-                Location = new Point(Chrome, 6)
+            _nav = new NavRail {
+                Location = new Point(0, 0),
+                Size = new Size(Rail, Math.Max(240, ClientSize.Height)),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left
             };
-            _btnBasic.Click += (s, e) => SetMode("basic");
-            _chrome.Controls.Add(_btnBasic);
+            _nav.Add("overview",    "Overview");
+            _nav.Add("modes",       "Power modes");
+            _nav.Add("insights",    "Insights");
+            _nav.Add("advanced",    "Advanced");
+            _nav.Add("health",      "Battery health");
+            _nav.Add("diagnostics", "Diagnostics");
+            _nav.SelectionChanged += (s, e) => SetPage(_nav.Selected);
 
-            _btnAdvanced = new PillButton {
-                Text = "Advanced", Tab = true, Size = new Size(100, 26), BackColor = Theme.Ink,
-                Location = new Point(Chrome + 78, 6)
+            _status = new StatusBlock {
+                Width = Rail,
+                Location = new Point(0, Math.Max(240, ClientSize.Height) - 96)
             };
-            _btnAdvanced.Click += (s, e) => SetMode("advanced");
-            _chrome.Controls.Add(_btnAdvanced);
+            _nav.Controls.Add(_status);
+
+            Controls.Add(_nav);
+            _nav.BringToFront();
         }
 
-        void BuildBasicCard()
+        /// <summary>
+        /// The two cards that open Insights: what the last change was worth, and what each
+        /// mode has cost.
+        ///
+        /// Both used to live in one 440px card that also held four mode buttons and a
+        /// machine summary, with several of its children overlapping each other and three
+        /// of them never added to it at all - including the only Undo the interface had.
+        /// They are two cards now, each about one question.
+        /// </summary>
+        void BuildInsightsHeadline()
         {
-            _basicCard = new Card { Width = W, Height = 470, Margin = new Padding(0, 0, 0, 10) };
+            _cardSaving = new SavingCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
+            _cardSaving.Undo.Click += (s, e) => RestoreBaseline();
+            _root.Controls.Add(_cardSaving);
 
-            _basicCard.Controls.Add(new Label {
-                Text = "Make this battery last longer", Location = new Point(18, 12), AutoSize = true,
-                Font = Theme.Head, ForeColor = Theme.Text, BackColor = Theme.Panel });
+            _cardModeCost = new ModeCostCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
+            _root.Controls.Add(_cardModeCost);
+        }
 
-            _basicState = new Label {
-                Location = new Point(18, 286), Size = new Size(W - 40, 34),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = Theme.Body, ForeColor = Theme.Dim, BackColor = Theme.Panel };
-            _basicCard.Controls.Add(_basicState);
+        /// <summary>
+        /// Overview, as designed: the battery stated once, the one thing worth doing, the
+        /// mode in effect and what is keeping the processor busy.
+        ///
+        /// These four go in above every heading, so TagSections leaves them untagged and
+        /// they fall to Overview. Each is a painted card that names itself to a screen
+        /// reader through its own Describe(), because a painted card is otherwise silent.
+        /// </summary>
+        void BuildOverview()
+        {
+            _pageTitle = new PageTitle { Width = W, Margin = new Padding(0, 0, 0, 4) };
+            _cardStatus = new StatusCard { Width = W, Margin = new Padding(0, 0, 0, 12) };
+            _cardAdvice = new AdviceCard { Width = W, Margin = new Padding(0, 0, 0, 12) };
 
-            _btnOptimise = new PillButton {
-                Text = "Optimise my battery", Glyph = Theme.GlyphCheck,
-                Location = new Point(18, 40), Size = new Size(230, 36),
-                Primary = true, BackColor = Theme.Panel };
-            _btnOptimise.Click += (s, e) => OptimiseBasic();
-            _basicCard.Controls.Add(_btnOptimise);
+            _cardMode = new ModeSummaryCard { Location = new Point(0, 0), Width = W / 2 };
+            _cardApps = new TopAppsCard { Location = new Point(0, 0), Width = W / 2 };
+            _overviewPair = new Panel {
+                Width = W, Height = 168, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 12)
+            };
+            _overviewPair.Controls.Add(_cardMode);
+            _overviewPair.Controls.Add(_cardApps);
 
-            PillButton undo = new PillButton {
-                Text = "Undo", Glyph = Theme.GlyphUndo,
-                Location = new Point(258, 40), Size = new Size(110, 36), BackColor = Theme.Panel };
-            undo.Click += (s, e) => RestoreBaseline();
-            _basicCard.Controls.Add(undo);
+            _cardAdvice.Act.Click += (s, e) => OverviewAct();
+            _cardAdvice.Recheck.Click += (s, e) => RunBusy(_cardAdvice.Recheck, delegate {
+                LoadValues(); RefreshWatch(); RefreshFixes(); });
+            _cardMode.Change.Click += (s, e) => SetPage("modes");
+            // Diagnostics has the GPU watch and the log; neither is a list of apps. The
+            // full ranking is "Running now" on Insights, so that is where See all goes -
+            // and it arrives sorted the way the card was, by processor time.
+            _cardApps.SeeAll.Click += (s, e) => {
+                // The card ranks every app by processor time, so the table has to arrive
+                // ranked the same way and unfiltered - "Running now" defaults to background
+                // processes only, which would have dropped the very apps you just clicked
+                // through from.
+                _sortCpu = true;
+                _bgOnly = false;
+                RefreshProcesses();
+                SetPage("insights");
+            };
 
-            _basicNow = new Label {
-                Location = new Point(18, 84), Size = new Size(W - 40, 18),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
-            _basicCard.Controls.Add(_basicNow);
+            _root.Controls.Add(_pageTitle);
+            _root.Controls.Add(_cardStatus);
+            _root.Controls.Add(_cardAdvice);
+            _root.Controls.Add(_overviewPair);
+            _root.Controls.SetChildIndex(_pageTitle, 0);
+            _root.Controls.SetChildIndex(_cardStatus, 1);
+            _root.Controls.SetChildIndex(_cardAdvice, 2);
+            _root.Controls.SetChildIndex(_overviewPair, 3);
+        }
 
-            // Four named modes rather than ten sliders. They are the existing profiles - the
-            // same ones Advanced offers, through the same row (BuildProfileRow) - so there is
-            // one definition of what each one means and one place that builds the button row.
-            _modesPanel = new Panel {
-                Location = new Point(18, 106), Size = new Size(W - 40, 40), BackColor = Theme.Panel };
-            _basicCard.Controls.Add(_modesPanel);
-            _modeBtns.AddRange(BuildProfileRow(_modesPanel, Presets.Basic, 40, (p, b) => WriteProfile(p, b)));
+        /// <summary>
+        /// Power modes: one card per profile, in place of a row of four identical buttons.
+        /// </summary>
+        void BuildPowerModes()
+        {
+            foreach (Preset p in Presets.All)
+            {
+                Preset local = p;
+                ModeCard card = new ModeCard {
+                    Width = W,
+                    Code = p.Code,
+                    ModeName = p.Friendly ?? p.Name,
+                    Blurb = p.Blurb,
 
-            _basicCard.Controls.Add(new Label {
-                Text = "What each mode has actually cost you", Location = new Point(18, 158),
-                AutoSize = true, Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+                    // The only mode that deliberately raises draw. Saying so on the card is
+                    // the difference between choosing it and discovering it.
+                    WarnText = p.Code == 4 ? "SHORTENS RUNTIME" : "",
+                    Margin = new Padding(0, 0, 0, 10)
+                };
+                card.Chips.AddRange(ChipsFor(p));
+                card.Use.Click += (s, e) => WriteProfile(local, card.Use);
+                _modeCards.Add(card);
+                _root.Controls.Add(card);
+            }
+        }
 
-            _modeTable = new Panel {
-                Location = new Point(18, 182), Size = new Size(W - 40, 98), BackColor = Theme.Panel,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
-            _modeTable.Paint += (s, e) => PaintModeTable(e.Graphics);
-            _basicCard.Controls.Add(_modeTable);
+        /// <summary>
+        /// What a profile actually changes, in words rather than registry values.
+        ///
+        /// The settings themselves are on the Advanced page for anyone who wants them; what
+        /// belongs on a mode card is the consequence - whether the processor may boost, how
+        /// soon the screen goes dark, which graphics chip it will use.
+        /// </summary>
+        static List<string> ChipsFor(Preset p)
+        {
+            List<string> chips = new List<string>();
+            int v;
 
-            _basicSaved = new Label {
-                Location = new Point(18, 324), Size = new Size(W - 40, 52),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = Theme.Body, ForeColor = Theme.Text, BackColor = Theme.Panel };
-            _basicCard.Controls.Add(_basicSaved);
+            if (p.Values.TryGetValue("boost", out v))
+            {
+                if (v == 0) chips.Add("Processor boost off");
+                else if (v == 1) chips.Add("Boost limited");
+                else if (v == 2) chips.Add("Boost unrestricted");
+                else chips.Add("Boost when it is needed");
+            }
+            if (p.Values.TryGetValue("videoidle", out v)) chips.Add("Screen off after " + ChipTime(v));
+            if (p.Values.TryGetValue("sleepidle", out v)) chips.Add("Sleeps after " + ChipTime(v));
+            if (p.Values.TryGetValue("switchable", out v))
+                chips.Add(v == 0 ? "Always the efficient graphics chip" : "May use the fast graphics chip");
+            return chips;
+        }
 
-            _basicStats = new Label {
-                Location = new Point(18, 380), Size = new Size(W - 40, 80),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
-            _basicCard.Controls.Add(_basicStats);
+        static string ChipTime(int seconds)
+        {
+            if (seconds <= 0) return "never";
+            if (seconds < 3600) return (seconds / 60) + " min";
+            int h = seconds / 3600;
+            return h + (h == 1 ? " hour" : " hours");
+        }
 
-            _root.Controls.Add(_basicCard);
-            _root.Controls.SetChildIndex(_basicCard, 0);      // first thing in the column
+        /// <summary>
+        /// Fill the mode cards: which one the machine matches, and what each has measured.
+        ///
+        /// Under five recorded minutes is not a measurement, so the card says it has not
+        /// been measured rather than printing an average of three readings.
+        /// </summary>
+        void RefreshModes()
+        {
+            if (_modeCards.Count == 0) return;
+
+            List<HistPoint> all = History.All();
+            foreach (ModeCard card in _modeCards)
+            {
+                List<HistPoint> mine = new List<HistPoint>();
+                foreach (HistPoint h in all) if (h.M == card.Code) mine.Add(h);
+
+                RuntimeAverage r = RuntimeAverage.From(mine);
+                card.Minutes = r.Minutes;
+                card.Watts = (r.Known && r.Minutes >= 5) ? (double?)r.Watts : null;
+                card.Current = card.Code == _modeCode;
+                card.Describe();
+                card.Invalidate();
+            }
+            ReflowModeCards();
+        }
+
+        /// <summary>Measured off-screen, because this runs during BuildUi before the form
+        /// has a window handle and CreateGraphics needs one.</summary>
+        void ReflowModeCards()
+        {
+            if (_modeCards.Count == 0) return;
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+                foreach (ModeCard card in _modeCards) card.Reflow(g);
+        }
+
+        /// <summary>Whichever button started an optimise, so the arc spins where the
+        /// person pressed rather than on a control that is no longer on screen.</summary>
+        PillButton OptimiseButton()
+        {
+            return _cardAdvice != null && _cardAdvice.Act.Visible ? _cardAdvice.Act : null;
+        }
+
+        /// <summary>What the Overview button acts on: a whole optimise, or the one thing
+        /// Windows has to do itself.</summary>
+        void OverviewAct()
+        {
+            if (_adviceFix != null) { ApplyFix(_adviceFix, _cardAdvice.Act); return; }
+            OptimiseBasic();
+        }
+
+        /// <summary>
+        /// Fill the Overview cards from the same measurements everything else uses.
+        ///
+        /// Nothing here computes a figure of its own: the charge and the draw come from the
+        /// battery poll, the time left from the recorded average, the mode from the machine
+        /// read-back, and the processes from the same window the contributors list uses. One
+        /// set of numbers, so two cards cannot disagree about the time left the way the old
+        /// header and Basic card did.
+        /// </summary>
+        void RefreshOverview()
+        {
+            if (_cardStatus == null) return;
+
+            _cardStatus.HasBattery = Machine.HasBattery;
+            _cardStatus.OnAc = _bat.OnAc;
+            _cardStatus.Charging = _bat.Charging;
+            _cardStatus.ChargePct = _bat.PercentOfFull;
+            _cardStatus.Mwh = _bat.RemainingMwh;
+            _cardStatus.FullMwh = _bat.FullChargeMwh;
+            _cardStatus.Watts = _bat.Watts;
+            _cardStatus.MeasuringLeft = _readout == null ? 0 : _readout.MeasuringLeft;
+            _cardStatus.HoursLeft = _bat.OnAc ? null : _avg.Left(_bat.RemainingMwh);
+            _cardStatus.Health = _bat.HealthPercent;
+            _cardStatus.Describe();
+            _cardStatus.Invalidate();
+
+            int fixable = 0;
+            Suggestion advisory = null;
+            foreach (Suggestion sg in _fixes)
+            {
+                if (sg.Kind == FixKind.Advisory) { if (advisory == null) advisory = sg; }
+                else fixable++;
+            }
+
+            _adviceFix = null;
+            _cardAdvice.FooterText = "Every power setting PowerDial can change is already set for long battery life.";
+
+            if (fixable > 0)
+            {
+                _cardAdvice.Warn = true;
+                _cardAdvice.Title = fixable + (fixable == 1
+                    ? " setting is costing you battery life" : " settings are costing you battery life");
+                _cardAdvice.Body = "One click changes them all, on the battery side only. Your " +
+                                   "plugged-in settings are not touched, and Undo puts everything back.";
+                _cardAdvice.Note = "";
+                _cardAdvice.AllSet = false;
+                _cardAdvice.Act.Text = "Optimise my battery";
+                _cardAdvice.Act.Glyph = Theme.GlyphCheck;
+                _cardAdvice.Act.Visible = true;
+            }
+            else if (advisory != null)
+            {
+                // Nothing left that this app can write, but something is still costing
+                // runtime. Say who has to change it rather than offering a button that
+                // quietly opens a Windows page and looks like it did the work.
+                _adviceFix = advisory;
+                _cardAdvice.Warn = true;
+                _cardAdvice.Title = advisory.Title;
+                _cardAdvice.Body = advisory.Detail;
+                _cardAdvice.Note = "PowerDial cannot change this for you - Windows decides which " +
+                                   "apps may run in the background.";
+                _cardAdvice.AllSet = true;
+                _cardAdvice.Act.Text = advisory.ActionLabel;
+                _cardAdvice.Act.Glyph = null;
+                _cardAdvice.Act.Visible = true;
+            }
+            else
+            {
+                _cardAdvice.Warn = false;
+                _cardAdvice.Title = "Nothing left to change";
+                _cardAdvice.Body = "Every power setting this app can write is already set for long " +
+                                   "battery life, and nothing is holding the graphics chip awake.";
+                _cardAdvice.Note = "";
+                _cardAdvice.AllSet = false;
+                _cardAdvice.Act.Visible = false;
+            }
+            _cardAdvice.Describe();
+
+            // Measured off-screen: this runs during BuildUi, before the form has a window
+            // handle, and CreateGraphics needs one.
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics mg = Graphics.FromImage(bmp))
+                _cardAdvice.Reflow(mg);
+            _cardAdvice.Invalidate();
+
+            Preset pr = Presets.ByCode(_modeCode);
+            _cardMode.Known = pr != null;
+            _cardMode.Mode = pr == null ? "" : (pr.Friendly ?? pr.Name);
+
+            // The card had an empty lower half; what this mode has actually cost is the
+            // most useful thing that can go in it, and it is already measured.
+            _cardMode.Watts = null;
+            _cardMode.Minutes = 0;
+            if (pr != null)
+            {
+                List<HistPoint> mine = new List<HistPoint>();
+                foreach (HistPoint h in History.All()) if (h.M == pr.Code) mine.Add(h);
+                RuntimeAverage ra = RuntimeAverage.From(mine);
+                _cardMode.Minutes = ra.Minutes;
+                if (ra.Known && ra.Minutes >= 5) _cardMode.Watts = ra.Watts;
+            }
+            _cardMode.Blurb = pr == null
+                ? "These settings do not match any mode. Something changed them in Windows or another app."
+                : pr.Blurb;
+            _cardMode.Describe();
+            _cardMode.Invalidate();
+
+            _cardApps.Rows.Clear();
+            List<KeyValuePair<string, double>> busiest = WindowTop(4);
+            foreach (KeyValuePair<string, double> kv in busiest)
+            {
+                TopAppsCard.Row r = new TopAppsCard.Row();
+                r.Name = kv.Key;
+                r.Seconds = kv.Value;
+                r.Background = IsBackground(kv.Key);
+                _cardApps.Rows.Add(r);
+            }
+            _cardApps.WindowSeconds = _bat.WindowSeconds;
+            _cardApps.Empty = _bat.OnAc
+                ? "Nothing timed yet - processor time is only recorded on battery."
+                : "Collecting: the first window takes " + _bat.WindowSeconds + " seconds.";
+            _cardApps.Describe();
+            _cardApps.Invalidate();
         }
 
         /// <summary>
@@ -955,23 +1470,12 @@ namespace PowerDial
         {
             Preset m = Presets.Match();
             _modeCode = m == null ? 0 : m.Code;
-            foreach (PillButton b in _modeBtns)
-            {
-                bool on = m != null && (Preset)b.Tag == m;
-                if (b.Selected != on) { b.Selected = on; b.Invalidate(); }
-            }
             foreach (PillButton b in _presetBtns)
             {
                 bool on = m != null && (Preset)b.Tag == m;
                 if (b.Selected != on) { b.Selected = on; b.Invalidate(); }
             }
 
-            if (_basicNow != null)
-            {
-                _basicNow.Text = m == null
-                    ? "Right now: a custom mix of settings. Pick one below to make it a known mode."
-                    : "Right now: " + (m.Friendly ?? m.Name) + " - " + m.Blurb;
-            }
         }
 
         /// <summary>One mode's measured record: how long it ran, and what it drew.</summary>
@@ -1013,125 +1517,92 @@ namespace PowerDial
         }
 
         /// <summary>
-        /// The comparison table. Bars are scaled against the thirstiest measured mode, so
-        /// the shape says "this one costs more" without implying a share of anything.
+        /// Feed the two Insights headline cards.
+        ///
+        /// One pass over the history serves both: what each mode cost, and what the last
+        /// change was worth. Neither card reads a file or parses anything in its paint
+        /// handler - a paint runs on every expose, resize and invalidate.
         /// </summary>
-        void PaintModeTable(Graphics g)
-        {
-            Theme.Quality(g);
-            g.Clear(Theme.Panel);
-
-            // Prepared by RefreshBasic. A paint handler runs on every expose, resize and
-            // invalidate, so it must not read files or parse anything.
-            List<ModeStat> stats = _modeStats;
-            double max = 0;
-            int measured = 0;
-            foreach (ModeStat st in stats) { if (st.Minutes > 0) { measured++; if (st.Watts > max) max = st.Watts; } }
-            if (max <= 0) max = 1;
-
-            if (measured == 0)
-            {
-                Theme.Str(g, "Nothing measured yet. Pick a mode and use the laptop on battery for a while - " +
-                             "this fills in as it goes.", Theme.Small, Theme.Dim, 0, 4);
-                return;
-            }
-
-            const int NameW = 150;
-            const int FigW = 200;
-            int barMax = Math.Max(20, _modeTable.Width - NameW - FigW - 12);
-            int y = 0;
-            foreach (ModeStat st in stats)
-            {
-                Theme.Str(g, st.Name, Theme.Body, Theme.Text, 0, y);
-
-                if (st.Minutes < 5)
-                {
-                    Theme.Str(g, "not measured yet", Theme.Small, Theme.Dim, NameW, y + 2);
-                    y += 24;
-                    continue;
-                }
-
-                Theme.FillRound(g, new Rectangle(NameW, y + 5, barMax, 9), 3, Theme.Inset);
-                int w = (int)Math.Round(st.Watts / max * barMax);
-                if (w < 2) w = 2;
-                Theme.FillRound(g, new Rectangle(NameW, y + 5, w, 9), 3, Theme.Spend);
-
-                string fig = st.Watts.ToString("0.0") + " W";
-                if (st.Hours.HasValue) fig += "   " + FmtHours(st.Hours.Value) + " a charge";
-                fig += "   (" + st.Minutes + " min)";
-                Theme.StrRight(g, fig, Theme.Small, Theme.Dim, _modeTable.Width, y + 2);
-                y += 24;
-            }
-        }
-
-        /// <summary>Plain language, measured numbers, and no figure it has not earned.</summary>
         void RefreshBasic()
         {
-            if (_basicCard == null) return;
+            if (_cardSaving == null || _cardModeCost == null) return;
 
             // A desktop is a supported target. It still has power settings worth changing,
-            // but "make this battery last longer" is the wrong promise to make to it.
+            // but "what your last change was worth" is measured from the battery counter,
+            // and without a battery there is nothing to measure it with.
             if (!Machine.HasBattery)
             {
-                _basicState.Text = "This PC has no battery, so there is nothing to make last longer. " +
-                                   "Advanced mode still has the power settings, the process list and the history.";
-                _btnOptimise.Visible = false;
-                foreach (PillButton b in _modeBtns) b.Visible = false;
-                _modeTable.Visible = false;
-                _basicSaved.Text = "";
-                _basicStats.Text = Machine.Summary();
+                _cardSaving.Idle = true;
+                _cardSaving.Waiting = false;
+                _cardSaving.Message = "This PC has no battery, so there is nothing here to measure. " +
+                                      "The power settings and the process list still work.";
+                _cardSaving.Fit();
+                _cardSaving.Invalidate();
+
+                _cardModeCost.Rows.Clear();
+                _cardModeCost.Empty = Machine.Summary();
+                _cardModeCost.Fit();
+                _cardModeCost.Invalidate();
+                _root.PerformLayout();
                 return;
             }
-            _btnOptimise.Visible = true;
-            foreach (PillButton b in _modeBtns) b.Visible = true;
-            _modeTable.Visible = true;
 
-            int fixable = 0;
-            foreach (Suggestion g in _fixes) if (g.Kind != FixKind.Advisory) fixable++;
-
-            _basicState.Text = fixable == 0
-                ? "Everything this app can set is already set for long battery life."
-                : fixable + (fixable == 1 ? " setting is" : " settings are") +
-                  " costing you battery life. One click changes them all - only for when you " +
-                  "are on battery, and Undo puts them back.";
-            _btnOptimise.Text = fixable == 0 ? "Check again" : "Optimise my battery";
-
-            // One pass over history for both of these, rather than one each.
             List<HistPoint> hist = History.All();
-            _modeStats = ModeStats(hist);
-            _basicSaved.Text = SavedText(hist);
-            if (_modeTable != null) _modeTable.Invalidate();
 
-            string left = "Battery time left: not measured yet";
-            double? hrs = _avg.Left(_bat.RemainingMwh);
-            if (_bat.OnAc) left = "Plugged in - battery readings pause while charging";
-            else if (hrs.HasValue) left = "About " + FmtHours(hrs.Value) + " left at your usual usage";
-
-            string health = "Battery health: not known on this PC";
-            if (_bat.FullChargeMwh.HasValue && Config.EffectiveDesignMwh > 0)
+            // ------------------------------------------------ what each mode has cost
+            _cardModeCost.Rows.Clear();
+            foreach (ModeStat st in ModeStats(hist))
             {
-                double pct = 100.0 * _bat.FullChargeMwh.Value / Config.EffectiveDesignMwh;
-                health = "Battery health: holds about " + pct.ToString("0") + "% of what it did when new";
+                ModeCostCard.Row r = new ModeCostCard.Row();
+                r.Name = st.Name;
+                r.Minutes = st.Minutes;
+                r.Watts = st.Watts;
+                r.Hours = st.Hours;
+                r.Current = NameOfMode(_modeCode) == st.Name;
+                _cardModeCost.Rows.Add(r);
             }
+            _cardModeCost.Empty = "Nothing measured yet. Pick a mode and use the laptop on battery " +
+                                  "for a few minutes - this fills in as it goes.";
+            _cardModeCost.Fit();
+            _cardModeCost.Invalidate();
 
-            string avg = _avg.Known
-                ? "Measured over " + _avg.Minutes + " recorded minutes on battery, averaging " +
-                  _avg.Watts.ToString("0.0") + " W"
-                : "Still measuring what this laptop draws - leave it running on battery for a while";
+            // ------------------------------------------------ what the last change was worth
+            FillSaving(hist);
+            _cardSaving.Fit();
+            _cardSaving.Invalidate();
 
-            _basicStats.Text = left + "\n" + health + "\n" + avg;
+            _root.PerformLayout();
+        }
+
+        /// <summary>The friendly name of a profile code, or null for a custom mix.</summary>
+        static string NameOfMode(int code)
+        {
+            foreach (Preset p in Presets.Basic) if (p.Code == code) return p.Friendly ?? p.Name;
+            return null;
         }
 
         /// <summary>
-        /// What the last optimise was worth, or an honest reason there is no figure yet.
-        /// Both averages are measured here; nothing is modelled.
+        /// The before/after comparison, as figures rather than a sentence.
+        ///
+        /// Same arithmetic as before - an average measured before the change against an
+        /// average measured since - but the card wants the numbers, not prose, so the three
+        /// outcomes (nothing to compare, not enough measured yet, a result) are states on
+        /// the card rather than three different paragraphs.
         /// </summary>
-        string SavedText(List<HistPoint> hist)
+        void FillSaving(List<HistPoint> hist)
         {
             Config c = Config.Current;
+            _cardSaving.Detail = "";
+
             if (!c.BeforeWatts.HasValue || c.OptimisedAtUnix <= 0)
-                return "Once you optimise, this will show what it actually saved - measured on " +
-                       "this laptop, not estimated.";
+            {
+                _cardSaving.Idle = true;
+                _cardSaving.Waiting = false;
+                _cardSaving.Message = "Nothing to compare yet. Once you optimise from Overview, or pick " +
+                                      "a mode, this shows what it actually saved - measured on this " +
+                                      "laptop, never estimated.";
+                return;
+            }
 
             List<HistPoint> since = new List<HistPoint>();
             foreach (HistPoint p in hist)
@@ -1139,31 +1610,38 @@ namespace PowerDial
 
             RuntimeAverage after = RuntimeAverage.From(since);
             if (!after.Known || after.Minutes < 10)
-                return "Measuring what that change was worth. It needs about " +
-                       Math.Max(1, 10 - after.Minutes) + " more minutes on battery before it can say.";
+            {
+                _cardSaving.Idle = false;
+                _cardSaving.Waiting = true;
+                _cardSaving.Message = "Measuring what that change was worth. It needs about " +
+                                      Math.Max(1, 10 - after.Minutes) +
+                                      " more minutes on battery before it can say - and only minutes " +
+                                      "spent on battery count.";
+                return;
+            }
 
-            double before = c.BeforeWatts.Value;
-            double delta = before - after.Watts;
-            string head = "Before: " + before.ToString("0.0") + " W   -   now: " + after.Watts.ToString("0.0") +
-                          " W   -   measured over " + after.Minutes + " minutes since.";
+            _cardSaving.Idle = false;
+            _cardSaving.Waiting = false;
+            _cardSaving.Before = c.BeforeWatts.Value;
+            _cardSaving.After = after.Watts;
+            _cardSaving.Minutes = after.Minutes;
 
-            if (Math.Abs(delta) < 0.15) return head + "\nNo measurable difference yet.";
+            double delta = _cardSaving.Before - _cardSaving.After;
+            if (Math.Abs(delta) < 0.15) { _cardSaving.Detail = "no measurable difference yet"; return; }
 
             RuntimeAverage was = new RuntimeAverage();
-            was.Watts = before;
+            was.Watts = c.BeforeWatts.Value;
             was.Minutes = c.BeforeMinutes;
             double? fullBefore = was.FromFull(_bat.FullChargeMwh);
             double? fullAfter = after.FromFull(_bat.FullChargeMwh);
 
-            string tail;
             if (fullBefore.HasValue && fullAfter.HasValue)
-                tail = delta > 0
-                    ? "That is about " + FmtHours(fullAfter.Value - fullBefore.Value) + " more from a full charge."
-                    : "That is about " + FmtHours(fullBefore.Value - fullAfter.Value) + " less from a full charge - " +
-                      "you have probably been working the machine harder since.";
+                _cardSaving.Detail = delta > 0
+                    ? "about " + FmtHours(fullAfter.Value - fullBefore.Value) + " more from a full charge"
+                    : "about " + FmtHours(fullBefore.Value - fullAfter.Value) + " less from a full charge - " +
+                      "you have probably been working the machine harder since";
             else
-                tail = delta > 0 ? "Drawing less than before." : "Drawing more than before.";
-            return head + "\n" + tail;
+                _cardSaving.Detail = delta > 0 ? "drawing less than before" : "drawing more than before";
         }
 
         /// <summary>
@@ -1177,7 +1655,7 @@ namespace PowerDial
 
             if (doable.Count == 0)
             {
-                RunBusy(_btnOptimise, delegate { LoadValues(); RefreshWatch(); RefreshFixes(); });
+                RunBusy(OptimiseButton(), delegate { LoadValues(); RefreshWatch(); RefreshFixes(); });
                 Log("Re-checked: nothing left that this app can set.");
                 RefreshBasic();
                 return;
@@ -1189,19 +1667,19 @@ namespace PowerDial
                     "Optimise my battery", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
 
-            WriteFixes(doable, _btnOptimise);
+            WriteFixes(doable, OptimiseButton());
         }
 
         void BuildWattsStrip()
         {
             _wattsStrip = new Card {
-                Location = new Point(Chrome, _readout.Bottom + 10), Width = W, Height = 124,
+                Location = new Point(Chrome, _readout.Bottom + 10), Width = W, Height = 164,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
             _wattsStrip.Controls.Add(new Label {
-                Text = "Where your watts go", Location = new Point(14, 9), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel });
+                Text = "Apps using the most power", Location = new Point(14, 9), AutoSize = true,
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
 
             // The figure the list is describing. Measured, never derived - see the info text.
             _wattsTotal = new Label {
@@ -1216,15 +1694,18 @@ namespace PowerDial
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             _wattsStrip.Controls.Add(_contribNote);
 
+            // Four rows at 22px need 88px. It was 68, so the fourth row was sliced in
+            // half by the panel edge - the card underneath had room to spare, which is
+            // why it read as a rendering glitch rather than as an overflow.
             _contribList = new Panel {
-                Location = new Point(14, 50), Size = new Size(W - 30, 68), BackColor = Theme.Panel,
+                Location = new Point(14, 50), Size = new Size(W - 30, 100), BackColor = Theme.Panel,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             _contribList.Paint += (s, e) => PaintContributors(e.Graphics);
             _wattsStrip.Controls.Add(_contribList);
 
             InfoDot cdot = new InfoDot {
                 Location = new Point(W - 32, 11), Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Heading = "Where your watts go",
+                Heading = "Apps using the most power",
                 Body = "The processes that burned the most CPU during the same window the watts figure " +
                        "was timed over, so the two describe the same slice of time rather than the draw " +
                        "from a minute ago and whatever happens to be busy this instant.\n\n" +
@@ -1241,57 +1722,6 @@ namespace PowerDial
             _chrome.Controls.Add(_wattsStrip);
         }
 
-        void BuildNav()
-        {
-            _navBar = new Panel {
-                Location = new Point(Chrome, _wattsStrip.Bottom + 10), Width = W, Height = 36,
-                BackColor = Theme.Ink,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            // The strip's baseline. Children paint over their parent, so the tabs are made
-            // two pixels shorter than the bar and this rule runs underneath them - drawn at
-            // the same height as the tabs it was hidden behind them, showing through only in
-            // the gaps as a row of dashes.
-            _navBar.Paint += (s, e) => {
-                Theme.Quality(e.Graphics);
-                using (Pen p = new Pen(Theme.Edge, 1f))
-                    e.Graphics.DrawLine(p, 0, _navBar.Height - 1, _navBar.Width - 4, _navBar.Height - 1);
-            };
-
-            // GPU watch and Activity share the More entry - both are collapsed, both sit
-            // under that heading, and two tabs for two things nobody opens daily crowded
-            // out the ones people do use.
-            string[] names = {
-                "Make it last longer", "Profiles", "What changes your watts", "Analytics", "More"
-            };
-            string[] labels = { "Fixes", "Profiles", "Settings", "Analytics", "More" };
-
-            int x = 0;
-            for (int i = 0; i < names.Length; i++)
-            {
-                Control target;
-                if (!_sections.TryGetValue(names[i], out target)) continue;
-
-                Control local = target;
-                int tw;
-                using (Graphics g = CreateGraphics())
-                    tw = (int)Math.Ceiling(Theme.TextW(g, labels[i], Theme.Tab));
-
-                PillButton b = new PillButton {
-                    Text = labels[i], Tab = true, Location = new Point(x, 0),
-                    Size = new Size(Math.Max(62, tw + 26), _navBar.Height - 2), BackColor = Theme.Ink
-                };
-                b.Click += (s, e) => JumpTo(local);
-                _navBar.Controls.Add(b);
-                _navBtns.Add(b);
-                _navTargets.Add(local);
-                x += b.Width + 2;
-            }
-
-            _chrome.Controls.Add(_navBar);
-
-            _chrome.Height = _navBar.Bottom + 10;
-        }
 
         /// <summary>
         /// Show the work on the button that was clicked. It used to be a progress bar that
@@ -1376,43 +1806,6 @@ namespace PowerDial
             base.Dispose(disposing);
         }
 
-        /// <summary>Scroll the column so a section sits just under the pinned header.</summary>
-        void JumpTo(Control target)
-        {
-            if (target == null || _root == null) return;
-            // Top is in scrolled coordinates; AutoScrollPosition.Y is zero or negative,
-            // so subtracting it recovers where the control sits in the content itself.
-            int y = target.Top - _root.AutoScrollPosition.Y - 8;
-            if (y < 0) y = 0;
-            _root.AutoScrollPosition = new Point(0, y);
-            MarkNav();
-        }
-
-        /// <summary>Light the button for whichever section the column is showing.</summary>
-        void MarkNav()
-        {
-            if (_root == null || _navBtns.Count == 0) return;
-            int view = -_root.AutoScrollPosition.Y;
-            int best = 0;
-            for (int i = 0; i < _navTargets.Count; i++)
-            {
-                int top = _navTargets[i].Top - _root.AutoScrollPosition.Y;
-                if (top <= view + 24) best = i;
-            }
-
-            // At the very bottom the last section can never win that test - Activity sits
-            // a few dozen pixels from the end, so its top only clears the viewport top on
-            // a window shorter than the section itself. Once the column cannot scroll any
-            // further, whatever is last is what you are looking at.
-            int maxScroll = _root.DisplayRectangle.Height - _root.ClientSize.Height;
-            if (maxScroll > 0 && view >= maxScroll - 4) best = _navTargets.Count - 1;
-            for (int i = 0; i < _navBtns.Count; i++)
-            {
-                bool on = i == best;
-                if (_navBtns[i].Selected != on) { _navBtns[i].Selected = on; _navBtns[i].Invalidate(); }
-            }
-        }
-
         /// <summary>
         /// Stretch what was built at the design width out to the window. Cards get set
         /// explicitly because a FlowLayoutPanel ignores Anchor on its own children; the
@@ -1422,29 +1815,53 @@ namespace PowerDial
         {
             if (_root == null) return;
 
-            int avail = ClientSize.Width - Chrome - 6 - SystemInformation.VerticalScrollBarWidth;
+            // Everything to the right of the sidebar is the page, so the column measures
+            // against what is left of the window rather than the whole of it.
+            int avail = ClientSize.Width - Rail - Chrome - 6 - SystemInformation.VerticalScrollBarWidth;
             int w = Math.Max(W, Math.Min(WMax, avail));
 
-            _chrome.Width = ClientSize.Width;
-            _root.Location = new Point(0, _chrome.Height);
-            _root.Size = new Size(ClientSize.Width, Math.Max(80, ClientSize.Height - _chrome.Height));
+            if (_nav != null)
+            {
+                _nav.Height = ClientSize.Height;
+                if (_status != null)
+                    _status.Location = new Point(0, Math.Max(200, _nav.Height - _status.Height));
+            }
+
+            _chrome.Location = new Point(Rail, 0);
+            _chrome.Width = Math.Max(80, ClientSize.Width - Rail);
+            _root.Location = new Point(Rail, _chrome.Height);
+            _root.Size = new Size(Math.Max(80, ClientSize.Width - Rail),
+                                  Math.Max(80, ClientSize.Height - _chrome.Height));
 
             // centre the column when the window is wider than the column is allowed to be
             int extra = Math.Max(0, avail - w);
-            _root.Padding = new Padding(Chrome + extra / 2, 12, 6, 20);
+            _root.Padding = new Padding(Chrome + extra / 2, 12, 6, 28);
             _readout.Width = w;
             _wattsStrip.Width = w;
-            _navBar.Width = w;
             _readout.Left = Chrome + extra / 2;
-            if (_btnBasic != null)
+            if (_cardSaving != null) _cardSaving.Width = w;
+            if (_cardModeCost != null) _cardModeCost.Width = w;
+            if (_pageTitle != null) _pageTitle.Width = w;
+            foreach (ModeCard mc in _modeCards) mc.Width = w;
+            ReflowModeCards();
+            if (_cardStatus != null) _cardStatus.Width = w;
+            if (_cardAdvice != null) _cardAdvice.Width = w;
+
+            // Mode and apps share one row, so they are sized against each other rather
+            // than stretched: the apps list carries four names and four figures and needs
+            // the greater share of it.
+            if (_overviewPair != null)
             {
-                _btnBasic.Left = _readout.Left;
-                _btnAdvanced.Left = _readout.Left + 78;
+                _overviewPair.Width = w;
+                int gap = 14;
+                int modeW = (int)Math.Round((w - gap) * 0.42);
+                _cardMode.Location = new Point(0, 0);
+                _cardMode.Width = modeW;
+                _cardApps.Location = new Point(modeW + gap, 0);
+                _cardApps.Width = Math.Max(160, w - modeW - gap);
+                _overviewPair.Height = Math.Max(_cardMode.Height, _cardApps.Height);
             }
-            if (_basicCard != null) _basicCard.Width = w;
-            if (_modesPanel != null) _modesPanel.Width = w - 40;
             _wattsStrip.Left = _readout.Left;
-            _navBar.Left = _readout.Left;
 
             foreach (Control c in _root.Controls)
             {
@@ -1458,13 +1875,11 @@ namespace PowerDial
                 c.Width = w;
             }
 
-            // The profile buttons share their row, so they have to be re-spaced rather than
-            // anchored - anchoring all of them would overlap them. Both rows are built by
-            // the same BuildProfileRow and re-spaced the same way here; only the width they
-            // have to share differs - the full column for Advanced, the card's inner width
-            // (40px of margin either side) for Basic.
+            // The profile buttons share their row, so they have to be re-spaced rather
+            // than anchored - anchoring all of them would overlap them. Only the Advanced
+            // row is left; Power modes uses cards now, and the Basic row it mirrored is
+            // gone with the card that held it.
             RespaceRow(_presetBtns, w);
-            RespaceRow(_modeBtns, w - 40);
 
             if (_fixList != null)
                 foreach (Control card in _fixList.Controls) card.Width = _fixList.Width;
@@ -1473,7 +1888,6 @@ namespace PowerDial
                 foreach (Control line in _watchList.Controls) line.Width = _watchList.Width;
 
             _root.PerformLayout();
-            MarkNav();
         }
 
         /// <summary>
@@ -1521,6 +1935,21 @@ namespace PowerDial
                     Theme.Str(g, sub, Theme.Small, Theme.Dim, sx, 24);
             };
             return host;
+        }
+
+        /// <summary>
+        /// Recolour a heading's title. Insights is the one page that is entirely measured
+        /// rather than set - nothing on it writes anything - and the green that means
+        /// "this is what you saved" everywhere else marks it as read-only throughout.
+        /// </summary>
+        static Panel Accent(Panel head)
+        {
+            foreach (Control c in head.Controls)
+            {
+                Label l = c as Label;
+                if (l != null) l.ForeColor = Theme.Save;
+            }
+            return head;
         }
 
         /// <summary>Wraps a collapsible header so it can carry an info icon too.</summary>
@@ -1597,11 +2026,18 @@ namespace PowerDial
 
         Card BuildRow(Knob k)
         {
-            Card c = new Card { Width = W, Height = 110, Margin = new Padding(0, 0, 0, 8) };
+            // 110 was measured against 11.5px labels and 28px controls. Body type is 14px
+            // now and the pickers and sliders are 32, so the control sat 4px from the floor
+            // of the card with the value label clipped against it.
+            // Title, note, the control, then what it currently reads on each side. The
+            // last of those used to start at y=84, ten pixels inside a control that now
+            // stands 32px tall - so the slider was drawn straight over the top half of it
+            // and the values looked sliced in two.
+            Card c = new Card { Width = W, Height = 142, Margin = new Padding(0, 0, 0, 10) };
             Row row = new Row { Knob = k, Host = c };
 
             Label title = new Label {
-                Text = k.Label, Location = new Point(14, 11), Size = new Size(W - 200, 20),
+                Text = k.Label, Location = new Point(18, 14), Size = new Size(W - 200, 22),
                 Font = Theme.Section, ForeColor = Theme.Text, BackColor = Theme.Panel,
                 AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -1622,7 +2058,7 @@ namespace PowerDial
             c.Controls.Add(dot);
 
             Label note = new Label {
-                Text = k.Note, Location = new Point(14, 31), Size = new Size(W - 40, 18),
+                Text = k.Note, Location = new Point(18, 38), Size = new Size(W - 48, 20),
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel,
                 AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -1630,7 +2066,7 @@ namespace PowerDial
 
             if (k.Choices != null)
             {
-                Picker d = new Picker { Location = new Point(14, 54), Size = new Size(300, 28) };
+                Picker d = new Picker { Location = new Point(18, 62), Size = new Size(320, 32) };
                 List<int> keys = new List<int>(k.Choices.Keys);
                 keys.Sort();
                 foreach (int kv in keys) d.Items.Add(k.Choices[kv]);
@@ -1650,7 +2086,7 @@ namespace PowerDial
             else
             {
                 Slider sl = new Slider {
-                    Location = new Point(14, 54), Size = new Size(W - 250, 28),
+                    Location = new Point(18, 62), Size = new Size(W - 258, 32),
                     Minimum = k.Min, Maximum = k.Max, Step = (k.Unit == "s" ? 60 : 1),
                     Accent = Theme.Save, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
                 };
@@ -1664,7 +2100,7 @@ namespace PowerDial
                 row.Slider = sl;
 
                 row.Value = new Label {
-                    Text = "--", Location = new Point(W - 226, 55), Size = new Size(70, 24),
+                    Text = "--", Location = new Point(W - 226, 64), Size = new Size(70, 26),
                     Font = Theme.Value, ForeColor = Theme.Text, BackColor = Theme.Panel,
                     TextAlign = ContentAlignment.MiddleRight, Anchor = AnchorStyles.Top | AnchorStyles.Right
                 };
@@ -1675,7 +2111,7 @@ namespace PowerDial
             // values line up down the whole page and can be compared by eye. Inline they
             // started at a different x on every card, which made them unscannable.
             row.Status = new Label {
-                Text = "", Location = new Point(14, 84), Size = new Size(SideCol - 20, 18),
+                Text = "", Location = new Point(18, 102), Size = new Size(SideCol - 24, 20),
                 Font = Theme.Small, ForeColor = Theme.Text, BackColor = Theme.Panel,
                 TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
@@ -1683,7 +2119,7 @@ namespace PowerDial
             c.Controls.Add(row.Status);
 
             row.Status2 = new Label {
-                Text = "", Location = new Point(SideCol, 84), Size = new Size(W - SideCol - 16, 18),
+                Text = "", Location = new Point(SideCol, 102), Size = new Size(W - SideCol - 20, 20),
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel,
                 TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -1848,6 +2284,11 @@ namespace PowerDial
             // Which profile the machine now matches, read back from the machine itself.
             // Every history point written from here on carries it.
             RefreshModeCode();
+
+            // The sidebar and the mode cards name that profile too, so they follow the same
+            // read rather than waiting for the next poll to catch up.
+            RefreshStatus();
+            RefreshModes();
         }
 
 
@@ -2022,7 +2463,9 @@ namespace PowerDial
 
             if (draining) _chartWatts.Push(p.W);
             RefreshHistory(false);
-            if (Config.IsBasic) RefreshBasic();
+            RefreshOverview();
+            RefreshBasic();
+            if (_page == "modes") RefreshModes();
         }
 
         string TopSummary()
@@ -2109,23 +2552,47 @@ namespace PowerDial
         void RefreshAnalytics()
         {
             _barHealth.Segments.Clear();
-            if (_bat.FullChargeMwh.HasValue)
-            {
-                double usable = _bat.FullChargeMwh.Value / 1000.0;
-                double design = BatteryMonitor.OriginalDesignMwh / 1000.0;
-                double lost = Math.Max(0, design - usable);
-                _barHealth.Segments.Add(new Segment { Name = "still holds", Value = usable, Color = Theme.Save });
-                _barHealth.Segments.Add(new Segment { Name = "lost to ageing", Value = lost, Color = Theme.Spend });
 
-                string note = usable.ToString("0.0") + " Wh of the " + design.ToString("0.0") +
-                              " Wh it shipped with.";
-                if (_bat.Watts.HasValue && _bat.Watts.Value > 0.1)
-                    note += "  At " + _bat.Watts.Value.ToString("0.00") + " W that missing capacity is " +
-                            FmtHours(lost / _bat.Watts.Value) + " you no longer have.";
-                else
-                    note += "  No software setting can recover it.";
-                _healthNote.Text = note;
+            if (!_bat.FullChargeMwh.HasValue)
+            {
+                // Plenty of machines simply do not report this. Saying so is better than a
+                // blank card, and much better than a made-up percentage.
+                _healthPct.Text = "Not reported by this PC";
+                _healthNote.Text = "Windows exposes a full-charge capacity for most laptop batteries, " +
+                                   "but not all of them. Everything else in this app still works - " +
+                                   "it just cannot say how much this one has aged.";
+                _barHealth.Invalidate();
+                return;
             }
+
+            double usable = _bat.FullChargeMwh.Value / 1000.0;
+            double design = BatteryMonitor.OriginalDesignMwh / 1000.0;
+            double lost = Math.Max(0, design - usable);
+            _barHealth.Segments.Add(new Segment { Name = "still holds", Value = usable, Color = Theme.Save });
+            _barHealth.Segments.Add(new Segment { Name = "lost to ageing", Value = lost, Color = Theme.Spend });
+
+            if (design > 0.01)
+            {
+                double pct = 100.0 * usable / design;
+                _healthPct.Text = pct.ToString("0") + "% of its original capacity";
+                _healthPct.ForeColor = pct >= 80 ? Theme.Text : (pct >= 60 ? Theme.Spend : Theme.Alert);
+            }
+            else
+            {
+                _healthPct.Text = usable.ToString("0.0") + " Wh";
+                _healthPct.ForeColor = Theme.Text;
+            }
+
+            string note = usable.ToString("0.0") + " Wh of the " + design.ToString("0.0") +
+                          " Wh it shipped with.";
+            if (_bat.Watts.HasValue && _bat.Watts.Value > 0.1)
+                note += "  At the " + _bat.Watts.Value.ToString("0.00") + " W measured just now, that " +
+                        "missing capacity is " + FmtHours(lost / _bat.Watts.Value) + " you no longer have.";
+            else
+                note += "  Use the laptop on battery for a minute and this will also say how much " +
+                        "running time that works out to.";
+            _healthNote.Text = note;
+
             _barHealth.Invalidate();
         }
 
@@ -2151,6 +2618,7 @@ namespace PowerDial
             _readout.FullMwh = _bat.FullChargeMwh;
             PushAverage();
             _readout.Invalidate();
+            RefreshStatus();
             RefreshAnalytics();
             RefreshContributors();
 
@@ -2158,6 +2626,31 @@ namespace PowerDial
                 (_bat.Watts.HasValue ? _bat.Watts.Value.ToString("0.0") + " W" : "measuring")) +
                 "  " + _bat.PercentOfFull + "%";
             if (_tray != null) _tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+        }
+
+        /// <summary>
+        /// The battery summary in the sidebar, which is on screen whichever section is.
+        ///
+        /// Charge, what is left and the mode in effect used to be spread across a pinned
+        /// header, a card and a status line, and the header and the card could state the
+        /// time left a minute apart. One block, one statement, visible everywhere.
+        /// </summary>
+        void RefreshStatus()
+        {
+            if (_status == null) return;
+            _status.HasBattery = Machine.HasBattery;
+            _status.OnAc = _bat.OnAc;
+            _status.ChargePct = _bat.PercentOfFull;
+
+            // Only the measured average earns a figure here. The live 60-second reading
+            // answers "what am I drawing this minute", which swings by several watts.
+            _status.HoursLeft = _bat.OnAc ? null : _avg.Left(_bat.RemainingMwh);
+
+            Preset p = Presets.ByCode(_modeCode);
+            _status.Mode = p == null ? "Custom settings" : (p.Friendly ?? p.Name);
+
+            _status.Describe();
+            _status.Invalidate();
         }
 
         /// <summary>
@@ -2189,6 +2682,7 @@ namespace PowerDial
             int barMax = Math.Max(20, _contribList.Width - NameW - FigW - 12);
 
             int y = 0;
+            int rank = 0;
             foreach (KeyValuePair<string, double> kv in top)
             {
                 Theme.Str(g, kv.Key, Theme.Body, Theme.Text, 0, y);
@@ -2199,19 +2693,26 @@ namespace PowerDial
                 {
                     float nx = g.MeasureString(kv.Key, Theme.Body).Width;
                     if (nx < NameW - 26)
-                        Theme.Str(g, "bg", Theme.Small, Theme.Dim, nx + 4, y + 2);
+                        Theme.Str(g, "bg", Theme.Small, Theme.Mute, nx + 4, y + 3);
                 }
 
                 // An empty track behind the bar, so a short bar still reads as a short bar
                 // rather than as a rendering that has not finished.
-                Theme.FillRound(g, new Rectangle(NameW, y + 4, barMax, 9), 3, Theme.Inset);
+                Theme.FillRound(g, new Rectangle(NameW, y + 6, barMax, 10), 3, Theme.Inset);
                 int barW = (int)Math.Round(kv.Value / max * barMax);
                 if (barW < 2) barW = 2;
-                Theme.FillRound(g, new Rectangle(NameW, y + 4, barW, 9), 3, Theme.Spend);
+
+                // Amber is energy leaving, and it only means that if it is spent on the one
+                // actually spending it. Every row in this list used to be amber, which made
+                // four ordinary processes look like four problems and drained the accent of
+                // the meaning it exists to carry. The busiest gets it; the rest are neutral.
+                Theme.FillRound(g, new Rectangle(NameW, y + 6, barW, 10), 3,
+                                rank == 0 ? Theme.Spend : Theme.Data);
 
                 Theme.StrRight(g, kv.Value.ToString("0.0") + "s", Theme.Small, Theme.Dim,
-                               _contribList.Width, y + 1);
-                y += 17;
+                               _contribList.Width, y + 2);
+                y += 22;
+                rank++;
             }
         }
 
@@ -2230,7 +2731,11 @@ namespace PowerDial
             int secs = 0;
             if (_window.Count > 0)
                 secs = (int)Math.Round((DateTime.UtcNow - _window[0].At).TotalSeconds);
-            _contribNote.Text = "Busiest processes over the same window - core-seconds, not watts.";
+            // Plain language, and the same sentence the Overview card uses: this measures
+            // processor time, and the app refuses to split measured watts across processes.
+            _contribNote.Text = secs > 0
+                ? "Processor time used over the last " + secs + " seconds. More time means more drain."
+                : "Processor time used over the measured window. More time means more drain.";
 
             // The measured figure the list is describing. Only ever the reading itself: the
             // section refuses to split it across processes, so it must not look split.
@@ -2800,7 +3305,9 @@ namespace PowerDial
                 prov += "  ·  " + Avg.Low.ToString("0.0") + " to " + Avg.High.ToString("0.0") + " W";
             if (AvgBest.HasValue && AvgWorst.HasValue)
                 prov += "  ·  " + HM(AvgWorst) + " to " + HM(AvgBest) + " from full";
-            Theme.StrRight(g, prov, Theme.Small, Theme.Dim, Width - 14, top + 47);
+            // Mute, not Dim: this is where the figures above came from, which is worth
+            // being able to read and is never the thing to read first.
+            Theme.StrRight(g, prov, Theme.Small, Theme.Mute, Width - 14, top + 47);
         }
 
         /// <summary>One figure in the average band. Returns how far to step right.</summary>

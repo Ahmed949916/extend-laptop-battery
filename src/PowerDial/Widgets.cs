@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Windows.Forms;
 
 namespace PowerDial
@@ -73,6 +74,10 @@ namespace PowerDial
         public Color Fill = Theme.Panel;
         public Color Border = Theme.Edge;
 
+        /// <summary>How heavy that border is. One pixel unless the card is saying
+        /// something with its edge - see ModeCard, which thickens it while in use.</summary>
+        public float EdgeWidth = 1f;
+
         /// <summary>Draw the lit top edge. On for cards on the ground, off for cards
         /// nested inside another card, where a second highlight just looks noisy.</summary>
         public bool Lift = true;
@@ -89,7 +94,7 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-            Theme.FillRound(g, r, Radius, Fill, Border);
+            Theme.FillRound(g, r, Radius, Fill, Border, EdgeWidth);
 
             // one lit pixel along the top, the way a real panel catches the light. Cheaper
             // and quieter than a drop shadow, and it survives being drawn on any ground.
@@ -113,8 +118,18 @@ namespace PowerDial
         /// hovered or current, and the current one carries an underline on the strip's
         /// baseline. Deliberately neutral - a green tab would spend an accent that means
         /// "energy kept" on saying "you are here".
+        ///
+        /// A property rather than a field because it decides what this control calls itself
+        /// to a screen reader: a tab and a button are announced differently, and getting
+        /// that wrong is worse than saying nothing.
         /// </summary>
-        public bool Tab;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool Tab
+        {
+            get { return _tab; }
+            set { _tab = value; Invalidate(); }
+        }
+        bool _tab;
 
         public string Glyph;              // optional Segoe Fluent Icons glyph
         bool _hot, _down;
@@ -141,13 +156,18 @@ namespace PowerDial
                 _angle = 0;
                 if (_busy)
                 {
-                    if (_spin == null)
+                    // Windows' "show animations" setting, off, means no turning arc: the
+                    // count beside it still climbs, so the button is still visibly working.
+                    if (!Theme.ReduceMotion)
                     {
-                        _spin = new Timer();
-                        _spin.Interval = 45;
-                        _spin.Tick += delegate { _angle = (_angle + 24) % 360; Invalidate(); Update(); };
+                        if (_spin == null)
+                        {
+                            _spin = new Timer();
+                            _spin.Interval = 45;
+                            _spin.Tick += delegate { _angle = (_angle + 24) % 360; Invalidate(); Update(); };
+                        }
+                        _spin.Start();
                     }
-                    _spin.Start();
                 }
                 else
                 {
@@ -201,12 +221,57 @@ namespace PowerDial
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Ink;
             Cursor = Cursors.Hand;
-            Height = 34;
+            Height = 36;                 // 34 was sized for 12.5px labels; body type is 14px now
+            TabStop = true;
+        }
+
+        /// <summary>The label is the name a screen reader reads out, so keep the two the
+        /// same automatically rather than hoping every call site remembers.</summary>
+        protected override void OnTextChanged(EventArgs e)
+        {
+            AccessibleName = Text;
+            base.OnTextChanged(e);
+        }
+
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new PillAccessibleObject(this);
+        }
+
+        /// <summary>
+        /// What Narrator is told about this button.
+        ///
+        /// A custom Control subclass reports no role, no name and no state by default, so
+        /// before this every control in the app announced as an unnamed pane - the app was
+        /// not partially usable with a screen reader, it was silent. Role tells you whether
+        /// you are on a tab or a button; Selected is what carries "you are here" for the
+        /// section strip and the profile rows, which otherwise existed only as a colour.
+        /// </summary>
+        sealed class PillAccessibleObject : Control.ControlAccessibleObject
+        {
+            public PillAccessibleObject(PillButton owner) : base(owner) { }
+
+            public override AccessibleRole Role
+            {
+                get { return ((PillButton)Owner).Tab ? AccessibleRole.PageTab : AccessibleRole.PushButton; }
+            }
+
+            public override AccessibleStates State
+            {
+                get
+                {
+                    AccessibleStates s = base.State;
+                    PillButton b = (PillButton)Owner;
+                    if (b.Selected) s |= AccessibleStates.Selected | AccessibleStates.Checked;
+                    if (b.Busy) s |= AccessibleStates.Busy;
+                    return s;
+                }
+            }
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hot = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { _hot = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnMouseDown(MouseEventArgs e) { _down = true; Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { Theme.KeyboardNav = false; _down = true; Invalidate(); base.OnMouseDown(e); }
         protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -222,18 +287,28 @@ namespace PowerDial
                 return;
             }
 
+            // The recommended action is filled, not outlined. An outlined primary sat at the
+            // same visual weight as everything beside it, which is how "Restore original
+            // settings" ended up looking like the main thing to do on the profiles section.
             Color fill, border, fg;
-            if (Selected)      { fill = Theme.Raise; border = Theme.Save;  fg = Theme.Text; }
-            else if (Primary)  { fill = Theme.Inset; border = Theme.Save;  fg = Theme.Save; }
-            else               { fill = Theme.Inset; border = Theme.Edge;  fg = Theme.Text; }
+            if (Selected)      { fill = Theme.Raise; border = Theme.Save; fg = Theme.Text; }
+            else if (Primary)  { fill = Theme.Save;  border = Theme.Save; fg = Theme.Ink;  }
+            else               { fill = Theme.Inset; border = Theme.Line; fg = Theme.Text; }
 
+            // Hover and press move the surface, never the accent: green says "this is the
+            // one in use", and a hover that also went green would say that about whatever
+            // the pointer happened to be passing over.
             if (_down) fill = ControlPaint.Dark(fill, 0.06f);
-            else if (_hot && !Selected) border = Theme.Hair;   // green now means "active"; hover must not claim it
             else if (_hot) fill = ControlPaint.Light(fill, 0.10f);
 
-            Theme.FillRound(g, r, 8, fill, border);
+            // Theme.ButtonEdge, not 1px: an outlined button on a dark ground needs a
+            // border you can actually see to read as a control rather than as a panel in
+            // a slightly different shade.
+            Theme.FillRound(g, r, 8, fill, border, Theme.ButtonEdge);
 
-            if (_busy) { PaintSpinner(g, Primary ? Theme.Save : fg); return; }
+            // fg, not the accent: a Primary button is now filled with the accent, so an
+            // accent-coloured arc on top of it would be an invisible spinner.
+            if (_busy) { PaintSpinner(g, fg); return; }
 
             float tx = 0;
             SizeF ts = g.MeasureString(Text, Theme.Title);
@@ -249,11 +324,7 @@ namespace PowerDial
             }
             Theme.Str(g, Text, Theme.Title, fg, tx, ty);
 
-            if (Focused)
-            {
-                using (Pen p = new Pen(Theme.Save, 1f) { DashStyle = DashStyle.Dot })
-                    g.DrawPath(p, Theme.Round(new Rectangle(2, 2, Width - 5, Height - 5), 6));
-            }
+            if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 8);
         }
 
         /// <summary>One tab in the section strip. Quiet until it means something.</summary>
@@ -275,9 +346,8 @@ namespace PowerDial
                 using (SolidBrush b = new SolidBrush(Theme.Save))
                     g.FillRectangle(b, 6, Height - bar, Math.Max(0, Width - 12), bar);
 
-            if (Focused)
-                using (Pen p = new Pen(Theme.Dim, 1f) { DashStyle = DashStyle.Dot })
-                    g.DrawPath(p, Theme.Round(new Rectangle(1, 1, Width - 3, body.Height - 2), 6));
+            if (Focused && Theme.KeyboardNav)
+                Theme.FocusRing(g, new Rectangle(0, 0, Width, body.Height + 1), 7);
         }
 
         /// <summary>Raise Click without a mouse. Mirrors SectionToggle.Toggle, so the
@@ -294,6 +364,7 @@ namespace PowerDial
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            Theme.KeyboardNav = true;
             if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter)
             {
                 OnClick(EventArgs.Empty);
@@ -301,6 +372,9 @@ namespace PowerDial
             }
             base.OnKeyDown(e);
         }
+
+        protected override void OnEnter(EventArgs e) { Invalidate(); base.OnEnter(e); }
+        protected override void OnLeave(EventArgs e) { Invalidate(); base.OnLeave(e); }
     }
 
     /// <summary>
@@ -339,9 +413,37 @@ namespace PowerDial
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Panel;
-            Height = 28;
+            Height = 32;
             Cursor = Cursors.Hand;
             TabStop = true;
+        }
+
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new SliderAccessibleObject(this);
+        }
+
+        /// <summary>
+        /// A slider that does not report its value is a slider a screen reader cannot use:
+        /// you can hear that you are on one, and never what it is set to. Every knob in the
+        /// settings section is one of these, so this is most of what the app is for.
+        /// </summary>
+        sealed class SliderAccessibleObject : Control.ControlAccessibleObject
+        {
+            public SliderAccessibleObject(Slider owner) : base(owner) { }
+
+            public override AccessibleRole Role { get { return AccessibleRole.Slider; } }
+
+            public override string Value
+            {
+                get { return ((Slider)Owner).Value.ToString(CultureInfo.CurrentCulture); }
+                set
+                {
+                    int v;
+                    if (int.TryParse(value, NumberStyles.Integer, CultureInfo.CurrentCulture, out v))
+                        ((Slider)Owner).Value = v;
+                }
+            }
         }
 
         Rectangle Track { get { return new Rectangle(8, Height / 2 - 3, Width - 16, 6); } }
@@ -373,6 +475,8 @@ namespace PowerDial
                 g.FillEllipse(b, cx - rad, cy - rad, rad * 2, rad * 2);
             using (SolidBrush b = new SolidBrush(Theme.Ink))
                 g.FillEllipse(b, cx - rad + 3, cy - rad + 3, (rad - 3) * 2, (rad - 3) * 2);
+
+            if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 8);
         }
 
         void SetFromX(int x)
@@ -390,6 +494,7 @@ namespace PowerDial
         protected override void OnMouseLeave(EventArgs e) { _hot = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            Theme.KeyboardNav = false;
             Focus(); _drag = true; SetFromX(e.X); base.OnMouseDown(e);
         }
         protected override void OnMouseMove(MouseEventArgs e)
@@ -411,6 +516,7 @@ namespace PowerDial
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            Theme.KeyboardNav = true;
             int big = Math.Max(Step, (Maximum - Minimum) / 20);
             if (e.KeyCode == Keys.Left)  { Value -= (e.Control ? big : Step); e.Handled = true; }
             if (e.KeyCode == Keys.Right) { Value += (e.Control ? big : Step); e.Handled = true; }
@@ -443,9 +549,34 @@ namespace PowerDial
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Panel;
-            Height = 28;
+            Height = 32;
             Cursor = Cursors.Hand;
             TabStop = true;
+        }
+
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new PickerAccessibleObject(this);
+        }
+
+        /// <summary>Announces as a combo box and reads back the option currently chosen,
+        /// which is the whole content of the control.</summary>
+        sealed class PickerAccessibleObject : Control.ControlAccessibleObject
+        {
+            public PickerAccessibleObject(Picker owner) : base(owner) { }
+
+            public override AccessibleRole Role { get { return AccessibleRole.ComboBox; } }
+
+            public override string Value
+            {
+                get { return ((Picker)Owner).SelectedText; }
+                set
+                {
+                    Picker p = (Picker)Owner;
+                    int i = p.Items.IndexOf(value);
+                    if (i >= 0) p.SelectedIndex = i;
+                }
+            }
         }
 
         public List<string> Items { get { return _items; } }
@@ -470,6 +601,13 @@ namespace PowerDial
         protected override void OnMouseLeave(EventArgs e) { _hot = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnMouseWheel(MouseEventArgs e) { }
 
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            Theme.KeyboardNav = false;
+            Focus();
+            base.OnMouseDown(e);
+        }
+
         protected override void OnClick(EventArgs e)
         {
             Focus();
@@ -485,6 +623,7 @@ namespace PowerDial
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            Theme.KeyboardNav = true;
             if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) { Open(); e.Handled = true; }
             else if (e.KeyCode == Keys.Down && _index < _items.Count - 1) { SelectedIndex = _index + 1; e.Handled = true; }
             else if (e.KeyCode == Keys.Up && _index > 0) { SelectedIndex = _index - 1; e.Handled = true; }
@@ -513,8 +652,9 @@ namespace PowerDial
             Theme.Quality(g);
             g.Clear(BackColor);
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-            Color border = (_hot || Focused || _open) ? Theme.Save : Theme.Edge;
-            Theme.FillRound(g, r, 6, Theme.Inset, border);
+            Color border = (Focused || _open) ? Theme.Save : Theme.Line;
+            Color fill = _hot ? ControlPaint.Light(Theme.Inset, 0.10f) : Theme.Inset;
+            Theme.FillRound(g, r, 6, fill, border);
 
             string t = SelectedText;
             SizeF ts = g.MeasureString(t, Theme.Body);
@@ -523,6 +663,8 @@ namespace PowerDial
             string chev = _open ? Theme.GlyphChevDown : Theme.GlyphChevRight;
             SizeF cs = g.MeasureString(chev, Theme.IconSmall);
             Theme.Str(g, chev, Theme.IconSmall, Theme.Dim, Width - cs.Width - 8, (Height - cs.Height) / 2f);
+
+            if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 6);
         }
 
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
@@ -631,14 +773,79 @@ namespace PowerDial
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            Size = new Size(18, 18);
+            Size = new Size(20, 20);
             BackColor = Theme.Panel;
             Cursor = Cursors.Hand;
-            TabStop = false;
+
+            // This used to be TabStop = false, which meant every explanation in the app -
+            // what a watt is, what boost does, what core-seconds are - could only be reached
+            // with a mouse. The technical vocabulary this app cannot avoid was locked behind
+            // a pointer, so a keyboard user got the jargon and none of the glossary.
+            TabStop = true;
 
             _close = new Timer();
             _close.Interval = 220;
             _close.Tick += delegate { CloseIfAway(); };
+        }
+
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new InfoAccessibleObject(this);
+        }
+
+        /// <summary>The dot itself says nothing; what it is about is in the heading it was
+        /// given, and what it says is the body. Both belong in the announcement.</summary>
+        sealed class InfoAccessibleObject : Control.ControlAccessibleObject
+        {
+            public InfoAccessibleObject(InfoDot owner) : base(owner) { }
+
+            public override AccessibleRole Role { get { return AccessibleRole.ButtonDropDown; } }
+
+            public override string Name
+            {
+                get
+                {
+                    InfoDot d = (InfoDot)Owner;
+                    return string.IsNullOrEmpty(d.Heading) ? "More information" : "About " + d.Heading;
+                }
+                set { Owner.AccessibleName = value; }
+            }
+
+            public override string Description { get { return ((InfoDot)Owner).Body; } }
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Space || keyData == Keys.Enter ||
+                   keyData == Keys.Escape || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            Theme.KeyboardNav = true;
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter)
+            {
+                _pinned = !_pinned;
+                if (_pinned) Open(); else ClosePopup();
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Escape && _pinned)
+            {
+                ClosePopup();
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnEnter(EventArgs e) { Invalidate(); base.OnEnter(e); }
+
+        /// <summary>Tabbing away closes it. Leaving a pinned popup floating over a section
+        /// you have already left is how you end up with two explanations on screen.</summary>
+        protected override void OnLeave(EventArgs e)
+        {
+            if (_pinned) ClosePopup();
+            Invalidate();
+            base.OnLeave(e);
         }
 
         protected override void Dispose(bool disposing)
@@ -677,6 +884,8 @@ namespace PowerDial
         protected override void OnMouseDown(MouseEventArgs e)
         {
             // A click is the reliable way in: it opens and stays open.
+            Theme.KeyboardNav = false;
+            Focus();
             _pinned = !_pinned;
             if (_pinned) Open(); else ClosePopup();
             base.OnMouseDown(e);
@@ -687,10 +896,12 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
             g.Clear(BackColor);
-            Color c = (_hot || _pinned) ? Theme.Save : Theme.Dim;
-            using (Pen p = new Pen(c, 1.2f)) g.DrawEllipse(p, 1, 1, Width - 3, Height - 3);
+            Color c = (_hot || _pinned || Focused) ? Theme.Save : Theme.Dim;
+            using (Pen p = new Pen(c, 1.2f)) g.DrawEllipse(p, 2, 2, Width - 5, Height - 5);
             SizeF s = g.MeasureString("i", Theme.Small);
             Theme.Str(g, "i", Theme.Small, c, (Width - s.Width) / 2f + 0.5f, (Height - s.Height) / 2f);
+
+            if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 10);
         }
 
         protected override void OnMouseEnter(EventArgs e)
@@ -791,9 +1002,62 @@ namespace PowerDial
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Ink;
-            Height = 34;
+            Height = 38;
             Cursor = Cursors.Hand;
+            TabStop = true;          // it could be focused before, but Enter did nothing
         }
+
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new ToggleAccessibleObject(this);
+        }
+
+        /// <summary>Announces whether the section it controls is open, which is the one
+        /// thing a chevron communicates and a screen reader could not previously hear.</summary>
+        sealed class ToggleAccessibleObject : Control.ControlAccessibleObject
+        {
+            public ToggleAccessibleObject(SectionToggle owner) : base(owner) { }
+
+            public override AccessibleRole Role { get { return AccessibleRole.ButtonDropDown; } }
+
+            public override string Name
+            {
+                get { return ((SectionToggle)Owner).Caption; }
+                set { Owner.AccessibleName = value; }
+            }
+
+            public override AccessibleStates State
+            {
+                get
+                {
+                    AccessibleStates s = base.State;
+                    s |= ((SectionToggle)Owner).Expanded ? AccessibleStates.Expanded : AccessibleStates.Collapsed;
+                    return s;
+                }
+            }
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Space || keyData == Keys.Enter || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            Theme.KeyboardNav = true;
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) { Toggle(); e.Handled = true; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            Theme.KeyboardNav = false;
+            Focus();
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnEnter(EventArgs e) { Invalidate(); base.OnEnter(e); }
+        protected override void OnLeave(EventArgs e) { Invalidate(); base.OnLeave(e); }
 
         protected override void OnMouseEnter(EventArgs e) { _hot = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { _hot = false; Invalidate(); base.OnMouseLeave(e); }
@@ -816,15 +1080,23 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
             g.Clear(BackColor);
-            Color c = _hot ? Theme.Text : Theme.Dim;
+            Color c = (_hot || Focused) ? Theme.Text : Theme.Dim;
             string chev = Expanded ? Theme.GlyphChevDown : Theme.GlyphChevRight;
-            Theme.Str(g, chev, Theme.IconSmall, c, 2, (Height - 14) / 2f);
-            Theme.Str(g, Caption, Theme.Section, _hot ? Theme.Text : Theme.Text, 20, (Height - 17) / 2f);
+
+            // Measured rather than nudged by hand: the offsets here were tuned against a
+            // 13px caption, and type is set in points now, so a fixed offset would drift
+            // the moment the display scaling changed.
+            SizeF cs = g.MeasureString(chev, Theme.IconSmall);
+            SizeF cap = g.MeasureString(Caption, Theme.Section);
+            Theme.Str(g, chev, Theme.IconSmall, c, 3, (Height - cs.Height) / 2f);
+            Theme.Str(g, Caption, Theme.Section, Theme.Text, 24, (Height - cap.Height) / 2f);
             if (Sub.Length > 0)
             {
-                float x = 20 + Theme.TextW(g, Caption, Theme.Section) + 10;
-                Theme.Str(g, Sub, Theme.Small, Theme.Dim, x, (Height - 15) / 2f);
+                SizeF sub = g.MeasureString(Sub, Theme.Small);
+                Theme.Str(g, Sub, Theme.Small, Theme.Dim, 24 + cap.Width + 10, (Height - sub.Height) / 2f);
             }
+
+            if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 6);
         }
     }
 
@@ -845,6 +1117,12 @@ namespace PowerDial
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Panel;
+
+            // A picture, not a control: name it so it is not announced as an unnamed pane,
+            // and keep it out of the tab order, where there is nothing to do with it.
+            AccessibleRole = AccessibleRole.Graphic;
+            AccessibleName = "Recent power use";
+            TabStop = false;
         }
 
         public void Push(double v)

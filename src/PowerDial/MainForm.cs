@@ -49,6 +49,7 @@ namespace PowerDial
         AdviceCard _cardAdvice;     // Overview: the one thing worth doing
         ModeSummaryCard _cardMode;  // Overview: which mode is in effect
         TopAppsCard _cardApps;      // Overview: what is keeping the processor busy
+        OriginalCompareCard _cardVsOriginal;  // Overview: the settings you started with, against now
         Panel _overviewPair;        // holds the mode and apps cards side by side
         PageTitle _pageTitle;       // the name of the section on screen
         readonly List<ModeCard> _modeCards = new List<ModeCard>();
@@ -79,7 +80,6 @@ namespace PowerDial
         Card _fixCard;
         Label _fixSummary;
         PillButton _fixApplyAll;
-        PillButton _btnRestore;
         List<Suggestion> _fixes = new List<Suggestion>();
         List<Finding> _findings;
         bool _fixesSeeded;
@@ -163,6 +163,18 @@ namespace PowerDial
 
             Machine.Detect(false);
 
+            // Before BuildUi, not after. The restore point is what the Default profile is
+            // built from, and BuildUi builds the mode cards - so capturing afterwards meant
+            // that on a genuine first run there was no Default to offer and the card was
+            // missing for that entire session. It captures once and never overwrites, so
+            // moving it earlier changes nothing on a machine that already has one. The log
+            // does not exist yet, so what it says is kept and written out below.
+            string cap = Baseline.CaptureIfMissing();
+
+            // an older snapshot has no plugged-in side; fill it in before the user can
+            // reach the switch that would make those values no longer original
+            string acCap = Baseline.BackfillAcIfMissing();
+
             BuildUi();
             BuildTray();
 
@@ -207,11 +219,6 @@ namespace PowerDial
                     ApplyKnob(r, _pendingValue);
                 }
             };
-
-            string cap = Baseline.CaptureIfMissing();
-            // an older snapshot has no plugged-in side; fill it in before the user can
-            // reach the switch that would make those values no longer original
-            string acCap = Baseline.BackfillAcIfMissing();
 
             int pruned = History.Prune();
             _bat.Poll();
@@ -392,8 +399,8 @@ namespace PowerDial
 
             // ---------------------------------------------------------- profiles
             _root.Controls.Add(Heading("Profiles", "each one writes the battery side only",
-                "Four tested combinations of the settings below, plus a way back. The same four " +
-                "Basic offers as its named modes - this is what each one actually sets.\n\n" +
+                "Four tested combinations of the settings below, and the settings this laptop " +
+                "arrived with. This is what each one actually sets.\n\n" +
                 "Balanced is the sensible default on any machine. Battery saver trades responsiveness " +
                 "for the last watt or so; Max battery goes further still and is the only one that " +
                 "turns boost off outright. Performance lets the CPU off the leash while still on " +
@@ -407,23 +414,11 @@ namespace PowerDial
             _presetBtns.AddRange(BuildProfileRow(_profileRow, Presets.All, 36, (p, b) => WriteProfile(p, b)));
             _root.Controls.Add(_profileRow);
 
-            Panel restoreRow = new Panel { Width = W, Height = 38, BackColor = Theme.Ink, Margin = new Padding(0, 0, 0, 2) };
-            _btnRestore = new PillButton {
-                Text = "Restore original settings", Glyph = Theme.GlyphUndo,
-                // Not Primary: putting the filled accent on Restore made undo look like
-                // the main thing to do here, ahead of the profiles the section is for.
-                Location = new Point(0, 0), Size = new Size(256, 38)
-            };
-            _btnRestore.Click += (s, e) => RestoreBaseline();
-            restoreRow.Controls.Add(_btnRestore);
-            _root.Controls.Add(restoreRow);
-
-            Label profileNote = new Label {
-                Text = "Puts every battery setting back to how it was before PowerDial existed.",
-                AutoSize = false, Width = W, Height = 20, ForeColor = Theme.Dim, Font = Theme.Small,
-                Margin = new Padding(2, 2, 0, 10), BackColor = Theme.Ink
-            };
-            _root.Controls.Add(profileNote);
+            // There was a "Restore original settings" button and a line of explanation
+            // here, tagged into this section and so shown at the foot of Power modes. Both
+            // are gone: the way back is the Original settings card in the list above, which
+            // says the same thing, carries what it measured, and shows whether you are on
+            // it - none of which a lone button below the cards could do.
 
 
             // ---------------------------------------------------------- impact knobs
@@ -989,7 +984,11 @@ namespace PowerDial
             _root.Size = new Size(Math.Max(80, ClientSize.Width - Rail),
                                   Math.Max(80, ClientSize.Height - _chrome.Height));
 
-            if (key == "overview") RefreshOverview();
+            // RefreshBasic is what fills the original-settings card as well as the two
+            // Insights cards - one pass over the history serves all three - so Overview
+            // needs it too. It is a page switch, not the poll, so the file read is cheap
+            // enough to do here.
+            if (key == "overview") { RefreshOverview(); RefreshBasic(); }
             else if (key == "modes") RefreshModes();
             else if (key == "insights") RefreshBasic();
             else if (key == "health") RefreshAnalytics();
@@ -1114,7 +1113,7 @@ namespace PowerDial
         void BuildInsightsHeadline()
         {
             _cardSaving = new SavingCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
-            _cardSaving.Undo.Click += (s, e) => RestoreBaseline();
+            _cardSaving.Undo.Click += (s, e) => RestoreBaseline(_cardSaving.Undo);
             _root.Controls.Add(_cardSaving);
 
             _cardModeCost = new ModeCostCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
@@ -1143,6 +1142,15 @@ namespace PowerDial
             _overviewPair.Controls.Add(_cardMode);
             _overviewPair.Controls.Add(_cardApps);
 
+            // Under the advice, above the pair: "what should I do" first, then "has any of
+            // this been worth it", then the detail.
+            _cardVsOriginal = new OriginalCompareCard { Width = W, Margin = new Padding(0, 0, 0, 12) };
+            // Power modes, not Insights. The button says "modes", and Power modes is where
+            // every mode is listed - each card now carrying what it measured here, which is
+            // what you came to this card wanting more of. Insights answers a different
+            // question, and the apps card next to this one already goes there.
+            _cardVsOriginal.SeeAll.Click += (s, e) => SetPage("modes");
+
             _cardAdvice.Act.Click += (s, e) => OverviewAct();
             _cardAdvice.Recheck.Click += (s, e) => RunBusy(_cardAdvice.Recheck, delegate {
                 LoadValues(); RefreshWatch(); RefreshFixes(); });
@@ -1164,11 +1172,13 @@ namespace PowerDial
             _root.Controls.Add(_pageTitle);
             _root.Controls.Add(_cardStatus);
             _root.Controls.Add(_cardAdvice);
+            _root.Controls.Add(_cardVsOriginal);
             _root.Controls.Add(_overviewPair);
             _root.Controls.SetChildIndex(_pageTitle, 0);
             _root.Controls.SetChildIndex(_cardStatus, 1);
             _root.Controls.SetChildIndex(_cardAdvice, 2);
-            _root.Controls.SetChildIndex(_overviewPair, 3);
+            _root.Controls.SetChildIndex(_cardVsOriginal, 3);
+            _root.Controls.SetChildIndex(_overviewPair, 4);
         }
 
         /// <summary>
@@ -1176,9 +1186,13 @@ namespace PowerDial
         /// </summary>
         void BuildPowerModes()
         {
-            foreach (Preset p in Presets.All)
+            // Offered, not All: the four designed profiles and then Default, which is read
+            // from this machine's own restore point rather than written into the source.
+            foreach (Preset p in Presets.Offered)
             {
                 Preset local = p;
+                bool original = p.Code == Presets.OriginalCode;
+
                 ModeCard card = new ModeCard {
                     Width = W,
                     Code = p.Code,
@@ -1191,10 +1205,60 @@ namespace PowerDial
                     Margin = new Padding(0, 0, 0, 10)
                 };
                 card.Chips.AddRange(ChipsFor(p));
-                card.Use.Click += (s, e) => WriteProfile(local, card.Use);
+
+                if (original)
+                {
+                    // A longer label than "Use this mode", so it gets the width for it -
+                    // Reflow right-aligns the button, so only the width has to change.
+                    card.Use.Text = "Put my settings back";
+                    card.Use.Size = new Size(196, 34);
+                    card.Info.Heading = "Original settings";
+                    card.Info.Body = DefaultProfileHelp();
+
+                    // Not WriteProfile. The snapshot records both sides of every setting,
+                    // and whether each one was stored in the scheme or inherited from a
+                    // Windows default - Restore puts all of that back, where writing the
+                    // battery values would make inherited settings explicit and quietly
+                    // leave the plugged-in side as the app had left it.
+                    card.Use.Click += (s, e) => RestoreBaseline(card.Use);
+                }
+                else
+                {
+                    card.Use.Click += (s, e) => WriteProfile(local, card.Use);
+                }
+
                 _modeCards.Add(card);
                 _root.Controls.Add(card);
             }
+        }
+
+        /// <summary>What Original settings are, where they are kept, and why they matter.</summary>
+        static string DefaultProfileHelp()
+        {
+            string when = Presets.OriginalCapturedUtc;
+            return
+                "Your own settings, as this laptop had them the first time PowerDial ran - " +
+                "before it wrote anything. Not a factory reset and not a Windows default: " +
+                "this is your starting point, whatever it happened to be. " +
+                (when != null ? "Captured " + when + " UTC.\n\n" : "\n\n") +
+
+                "Nothing here is copied from anywhere: every value on the card below was " +
+                "read off this machine. If something had already " +
+                "changed these settings before PowerDial's first run - a vendor utility, or " +
+                "you - then that is what this restores to, because that is what your " +
+                "\"before\" really was.\n\n" +
+
+                "Kept in baseline.json alongside the history, written once and never " +
+                "overwritten, so it survives restarts, app updates and reinstalls. Choosing " +
+                "it puts every setting back, on battery and plugged in, including the ones " +
+                "Windows was supplying by default rather than storing in the scheme.\n\n" +
+
+                "It is also the reference point the rest of the app is measured against. " +
+                "Minutes recorded while you are on these settings are grouped under them " +
+                "like any other mode, so \"What each mode has cost you\" on Insights fills in " +
+                "its row - and that row is the only honest answer to \"what is this app " +
+                "actually saving me\", because it is the same laptop, measured the same way, " +
+                "on the settings you started with.";
         }
 
         /// <summary>
@@ -1500,7 +1564,7 @@ namespace PowerDial
         {
             List<ModeStat> outp = new List<ModeStat>();
 
-            foreach (Preset p in Presets.Basic)
+            foreach (Preset p in Presets.Offered)
             {
                 List<HistPoint> mine = new List<HistPoint>();
                 foreach (HistPoint h in all) if (h.M == p.Code) mine.Add(h);
@@ -1563,8 +1627,11 @@ namespace PowerDial
             }
             _cardModeCost.Empty = "Nothing measured yet. Pick a mode and use the laptop on battery " +
                                   "for a few minutes - this fills in as it goes.";
+            _cardModeCost.Recorded = RecordedSpan(hist);
             _cardModeCost.Fit();
             _cardModeCost.Invalidate();
+
+            FillCompare(hist);
 
             // ------------------------------------------------ what the last change was worth
             FillSaving(hist);
@@ -1574,10 +1641,127 @@ namespace PowerDial
             _root.PerformLayout();
         }
 
+        /// <summary>
+        /// Over what stretch of time the history was gathered, in words.
+        ///
+        /// Minutes recorded and days covered are different claims, and the second is what
+        /// says whether the first is worth trusting.
+        /// </summary>
+        static string RecordedSpan(List<HistPoint> hist)
+        {
+            if (hist == null || hist.Count == 0) return "";
+
+            long lo = hist[0].T, hi = hist[0].T;
+            foreach (HistPoint h in hist) { if (h.T < lo) lo = h.T; if (h.T > hi) hi = h.T; }
+
+            DateTime from = DateTimeOffset.FromUnixTimeSeconds(lo).LocalDateTime;
+            double days = (hi - lo) / 86400.0;
+
+            if (days < 1) return "Recorded today.";
+            int d = (int)Math.Round(days);
+            return "Recorded over " + d + (d == 1 ? " day" : " days") + ", since " +
+                   from.ToString("d MMM") + ".";
+        }
+
+        /// <summary>
+        /// The Overview comparison: this machine on its own original settings against
+        /// whatever mode it is in now.
+        ///
+        /// Both sides come from the same recorded history as every other figure, grouped
+        /// by the profile in effect when each minute was measured. Five minutes is the
+        /// floor for either side to count - below that a single busy minute decides the
+        /// answer, and the card would be reporting noise as a saving.
+        /// </summary>
+        void FillCompare(List<HistPoint> hist)
+        {
+            if (_cardVsOriginal == null) return;
+
+            OriginalCompareCard.Side baseSide = _cardVsOriginal.Base;
+            OriginalCompareCard.Side nowSide = _cardVsOriginal.Now;
+
+            baseSide.Name = "Original settings";
+            Fill(baseSide, hist, Presets.OriginalCode);
+
+            string nowName = NameOfMode(_modeCode);
+            nowSide.Name = nowName ?? "Your settings now";
+            Fill(nowSide, hist, _modeCode);
+
+            _cardVsOriginal.Verdict = "";
+            _cardVsOriginal.VerdictColor = Theme.Text;
+            _cardVsOriginal.Note = RecordedSpan(hist);
+
+            if (_modeCode == Presets.OriginalCode)
+            {
+                // Nothing to compare against itself. Say what it would take instead.
+                _cardVsOriginal.Verdict = "You are on your original settings";
+                _cardVsOriginal.VerdictColor = Theme.Dim;
+                _cardVsOriginal.Note = "Pick a mode on Power modes and this will say what it was worth.";
+            }
+            else if (!baseSide.Known)
+            {
+                _cardVsOriginal.Note = Presets.Original == null
+                    ? "No restore point was captured on this PC, so there is nothing to compare with."
+                    : "Nothing recorded on your original settings yet. Power modes has an Original " +
+                      "settings card - put them back, use the laptop on battery for a few minutes, " +
+                      "then switch back, and this fills in.";
+            }
+            else if (!nowSide.Known)
+            {
+                _cardVsOriginal.Note = "Measuring this mode. It needs a few minutes on battery.";
+            }
+            else if (baseSide.Hours.HasValue && nowSide.Hours.HasValue)
+            {
+                double delta = nowSide.Hours.Value - baseSide.Hours.Value;
+                if (Math.Abs(delta) < 0.05)
+                {
+                    _cardVsOriginal.Verdict = "About the same";
+                    _cardVsOriginal.VerdictColor = Theme.Dim;
+                }
+                else
+                {
+                    _cardVsOriginal.Verdict = OriginalCompareCard.Hm(Math.Abs(delta)) +
+                                              (delta > 0 ? " more" : " less") + " a charge";
+                    _cardVsOriginal.VerdictColor = delta > 0 ? Theme.Save : Theme.Spend;
+                }
+            }
+            else
+            {
+                double delta = baseSide.Watts - nowSide.Watts;
+                if (Math.Abs(delta) < 0.15)
+                {
+                    _cardVsOriginal.Verdict = "About the same";
+                    _cardVsOriginal.VerdictColor = Theme.Dim;
+                }
+                else
+                {
+                    _cardVsOriginal.Verdict = Math.Abs(delta).ToString("0.0") + " W " +
+                                              (delta > 0 ? "less" : "more");
+                    _cardVsOriginal.VerdictColor = delta > 0 ? Theme.Save : Theme.Spend;
+                }
+            }
+
+            _cardVsOriginal.Describe();
+            _cardVsOriginal.Invalidate();
+        }
+
+        /// <summary>One side of the comparison, from the minutes recorded under a code.</summary>
+        void Fill(OriginalCompareCard.Side d, List<HistPoint> hist, int code)
+        {
+            List<HistPoint> mine = new List<HistPoint>();
+            if (code != 0)
+                foreach (HistPoint h in hist) if (h.M == code) mine.Add(h);
+
+            RuntimeAverage r = RuntimeAverage.From(mine);
+            d.Minutes = r.Minutes;
+            d.Watts = r.Watts;
+            d.Known = r.Known && r.Minutes >= 5;
+            d.Hours = d.Known ? r.FromFull(_bat.FullChargeMwh) : null;
+        }
+
         /// <summary>The friendly name of a profile code, or null for a custom mix.</summary>
         static string NameOfMode(int code)
         {
-            foreach (Preset p in Presets.Basic) if (p.Code == code) return p.Friendly ?? p.Name;
+            foreach (Preset p in Presets.Offered) if (p.Code == code) return p.Friendly ?? p.Name;
             return null;
         }
 
@@ -1839,6 +2023,7 @@ namespace PowerDial
             _readout.Width = w;
             _wattsStrip.Width = w;
             _readout.Left = Chrome + extra / 2;
+            if (_cardVsOriginal != null) _cardVsOriginal.Width = w;
             if (_cardSaving != null) _cardSaving.Width = w;
             if (_cardModeCost != null) _cardModeCost.Width = w;
             if (_pageTitle != null) _pageTitle.Width = w;
@@ -2180,7 +2365,7 @@ namespace PowerDial
                 Preset local = p;
                 menu.Items.Add(p.Friendly ?? p.Name, null, (s, e) => ApplyPreset(local));
             }
-            menu.Items.Add("Restore my settings", null, (s, e) => RestoreBaseline());
+            menu.Items.Add("Original settings", null, (s, e) => RestoreBaseline());
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Open PowerDial", null, (s, e) => ShowFromTray());
             menu.Items.Add("Quit PowerDial", null, (s, e) => Quit());
@@ -3092,6 +3277,20 @@ namespace PowerDial
 
         void RestoreBaseline()
         {
+            // No button to spin: this is the tray menu's route, and the menu is gone by
+            // the time the work starts. BeginBusy takes null.
+            RestoreBaseline(null);
+        }
+
+        /// <summary>
+        /// Put every setting back as it was before the app ran.
+        ///
+        /// Takes the button that asked, because there are three of them now - Advanced,
+        /// the tray menu and the Default card on Power modes - and the progress arc has to
+        /// spin on the one that was actually pressed rather than on a button two pages away.
+        /// </summary>
+        void RestoreBaseline(PillButton on)
+        {
             BaselineFile bf = Baseline.Load();
             string when = bf.CapturedUtc == "(none)" ? "the tuning session" : bf.CapturedUtc + " UTC";
             int withAc = 0;
@@ -3104,12 +3303,12 @@ namespace PowerDial
                 "Put the settings back as they were before PowerDial?\n\n" +
                 "Restore point: " + when + "\n" +
                 acLine,
-                "Restore my settings", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+                "Original settings", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
             // Restore writes both sides of every setting in one call, so there is no
             // per-step hook to hang progress on - the arc spins with no count.
-            BeginBusy(_btnRestore, 0);
+            BeginBusy(on, 0);
             List<string> lines = Baseline.Restore();
             foreach (string line in lines) Log(line);
             // Selection follows from LoadValues -> RefreshModeCode below, the same honest

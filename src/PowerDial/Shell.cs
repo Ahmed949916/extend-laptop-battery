@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -118,11 +118,16 @@ namespace PowerDial
 
             // The current entry carries a bar as well as a fill, so "you are here" is not
             // resting on colour alone - and the label goes heavier for the same reason.
+            //
+            // Lead, not Save: the page title on the page this entry opens is set in the
+            // same yellow, so the sidebar and the heading agree about where you are. Green
+            // means "energy kept" everywhere else in the app and should not also mean
+            // "selected".
             if (_current)
-                using (SolidBrush b = new SolidBrush(Theme.Save))
+                using (SolidBrush b = new SolidBrush(Theme.Lead))
                     g.FillRectangle(b, 0, body.Y + 9, 3, body.Height - 18);
 
-            Color fg = (_current || _hot) ? Theme.Text : Theme.Dim;
+            Color fg = _current ? Theme.Lead : (_hot ? Theme.Text : Theme.Dim);
             Font f = _current ? Theme.Section : Theme.Body;
             SizeF ts = g.MeasureString(Text, f);
             Theme.Str(g, Text, f, fg, 16, (Height - ts.Height) / 2f);

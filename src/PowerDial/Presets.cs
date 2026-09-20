@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace PowerDial
 {
@@ -120,6 +120,84 @@ namespace PowerDial
         };
 
         /// <summary>
+        /// Stable id for the Original settings profile - how this machine was set up
+        /// before the app wrote anything. Five, and never renumbered, for the same reason
+        /// as the four above: history on disk refers to it.
+        /// </summary>
+        public const int OriginalCode = 5;
+
+        static Preset _original;
+        static bool _originalRead;
+
+        /// <summary>
+        /// Original settings: whatever this laptop was set to before PowerDial touched
+        /// it, read from the restore point captured on first run.
+        ///
+        /// It is not written into this file because it cannot be - every machine's is
+        /// different, and a hard-coded "factory default" would be exactly the borrowed
+        /// number this app refuses to show. The values come from baseline.json, which is
+        /// written once on first run and never overwritten, so the profile survives
+        /// restarts, updates and reinstalls of the app.
+        ///
+        /// Null when no restore point exists, which is the honest answer on a machine
+        /// where the capture failed: there is then no such thing as "your default" to
+        /// offer, and the card says so rather than inventing one.
+        /// </summary>
+        public static Preset Original
+        {
+            get
+            {
+                if (_originalRead) return _original;
+                _originalRead = true;
+
+                BaselineFile bf = Baseline.Load();
+                if (bf == null || bf.Entries == null || bf.CapturedUtc == "(none)") return null;
+
+                Dictionary<string, int> vals = new Dictionary<string, int>();
+                foreach (BaselineEntry e in bf.Entries)
+                    if (e.Value.HasValue && !vals.ContainsKey(e.Key)) vals[e.Key] = e.Value.Value;
+                if (vals.Count == 0) return null;
+
+                _original = new Preset {
+                    Name = "Original", Code = OriginalCode, Friendly = "Original settings",
+                    Blurb = "How this laptop was set up before PowerDial changed anything. " +
+                            "Kept as the reference every other mode is measured against.",
+                    Values = vals
+                };
+                return _original;
+            }
+        }
+
+        /// <summary>When the restore point behind Original settings was taken, or null.</summary>
+        public static string OriginalCapturedUtc
+        {
+            get
+            {
+                BaselineFile bf = Baseline.Load();
+                return (bf == null || bf.CapturedUtc == "(none)") ? null : bf.CapturedUtc;
+            }
+        }
+
+        /// <summary>
+        /// Every profile a person is offered: the four designed ones, then the machine's
+        /// own original settings.
+        ///
+        /// They come last rather than first because the four are ordered least to most
+        /// power and "however this laptop arrived" is not on that axis. Putting it in the
+        /// middle of the run would break the ordering the list is meant to communicate.
+        /// </summary>
+        public static List<Preset> Offered
+        {
+            get
+            {
+                List<Preset> outp = Basic;
+                Preset og = Original;
+                if (og != null) outp.Add(og);
+                return outp;
+            }
+        }
+
+        /// <summary>
         /// Which profile the battery side currently matches exactly, or null for a custom
         /// mix. Knobs Windows does not define on this PC are skipped rather than counted as
         /// a mismatch, so a machine missing one setting can still match a profile.
@@ -127,28 +205,39 @@ namespace PowerDial
         /// This reads the machine rather than trusting whatever the app last wrote: the
         /// settings can be changed in Windows, by a vendor tool, or by another profile, and
         /// history is only worth grouping by mode if the mode recorded is the real one.
+        ///
+        /// The four designed profiles are tested first, so a machine whose original
+        /// settings happen to equal Balanced still reads as Balanced - both are true, and
+        /// keeping the named one stops existing history changing meaning.
         /// </summary>
         public static Preset Match()
         {
             foreach (Preset p in All)
-            {
-                bool all = true;
-                foreach (KeyValuePair<string, int> kv in p.Values)
-                {
-                    Knob k = PowerCfg.Find(kv.Key);
-                    if (k == null) continue;
-                    int? v = PowerCfg.Read(k, true);
-                    if (!v.HasValue || v.Value != kv.Value) { all = false; break; }
-                }
-                if (all) return p;
-            }
+                if (Matches(p)) return p;
+
+            Preset og = Original;
+            if (og != null && Matches(og)) return og;
+
             return null;
+        }
+
+        static bool Matches(Preset p)
+        {
+            foreach (KeyValuePair<string, int> kv in p.Values)
+            {
+                Knob k = PowerCfg.Find(kv.Key);
+                if (k == null) continue;
+                int? v = PowerCfg.Read(k, true);
+                if (!v.HasValue || v.Value != kv.Value) return false;
+            }
+            return true;
         }
 
         public static Preset ByCode(int code)
         {
             foreach (Preset p in All) if (p.Code == code) return p;
-            return null;
+            Preset og = Original;
+            return (og != null && og.Code == code) ? og : null;
         }
 
         /// <summary>

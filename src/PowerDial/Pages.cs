@@ -75,6 +75,14 @@ namespace PowerDial
 
         public readonly PillButton Use = new PillButton();
 
+        /// <summary>
+        /// Optional explanation, beside the name. Most modes do not need one - the blurb
+        /// and the chips under it say what they do. Default does: what it is, where it is
+        /// kept and why it is worth returning to are all things you cannot read off a list
+        /// of settings.
+        /// </summary>
+        public readonly InfoDot Info = new InfoDot();
+
         const int TextX = 62;
         const int RightW = 216;
 
@@ -88,6 +96,10 @@ namespace PowerDial
             Use.BackColor = Theme.Panel;
             Use.Size = new Size(150, 34);
             Controls.Add(Use);
+
+            Info.BackColor = Theme.Panel;
+            Info.Visible = false;          // shown only once a Body has been given
+            Controls.Add(Info);
         }
 
         public void Describe()
@@ -109,6 +121,13 @@ namespace PowerDial
             Border = Current ? Theme.Save : Theme.Edge;
             EdgeWidth = Current ? Theme.ActiveEdge : 1f;
             Use.Visible = !Current;
+
+            // Beside the name, measured rather than guessed - the names are different
+            // lengths and the dot has to sit against whichever one this card carries.
+            Info.Visible = Info.Body.Length > 0;
+            if (Info.Visible)
+                Info.Location = new Point(
+                    (int)(TextX + g.MeasureString(ModeName, Theme.Section).Width + 8), 21);
 
             int textW = Math.Max(120, Width - TextX - RightW - 20);
             float blurbH = g.MeasureString(Blurb, Theme.Body, textW).Height;
@@ -141,6 +160,9 @@ namespace PowerDial
             SizeF ns = g.MeasureString(ModeName, Theme.Section);
             Theme.Str(g, ModeName, Theme.Section, Theme.Text, x, 20);
             x += ns.Width + 10;
+
+            // the badge starts after the dot, not under it
+            if (Info.Visible) x += 26;
 
             if (Current) StatusCard.Pill(g, x, 24, "IN USE NOW", Theme.Save);
             else if (WarnText.Length > 0) StatusCard.Pill(g, x, 24, WarnText, Theme.Spend);
@@ -515,7 +537,9 @@ namespace PowerDial
 
         public ModeSummaryCard()
         {
-            Height = 206;
+            // 206 left four pixels between the Change button and the box under it, which
+            // read as the button resting on the box rather than sitting above it.
+            Height = 228;
             AccessibleRole = AccessibleRole.Grouping;
 
             Change.Text = "Change";
@@ -544,7 +568,7 @@ namespace PowerDial
 
             Theme.Str(g, "Power mode", Theme.Section, Theme.Text, 20, 20);
 
-            Rectangle box = new Rectangle(20, 56, Math.Max(80, Width - 40), 68);
+            Rectangle box = new Rectangle(20, 70, Math.Max(80, Width - 40), 68);
             Theme.FillRound(g, box, 6, Known ? Color.FromArgb(30, Theme.Save) : Theme.Inset,
                             Known ? Theme.Save : Theme.Edge);
 
@@ -564,14 +588,14 @@ namespace PowerDial
             // goes here rather than being left to the Insights page alone.
             if (Watts.HasValue)
             {
-                Theme.Str(g, "Measured here", Theme.Small, Theme.Mute, 20, 136);
-                Theme.Str(g, Watts.Value.ToString("0.0") + " W", Theme.Stat, Theme.Text, 20, 154);
-                Theme.Str(g, "over " + Minutes + " min on battery", Theme.Small, Theme.Mute, 78, 160);
+                Theme.Str(g, "Measured here", Theme.Small, Theme.Mute, 20, 152);
+                Theme.Str(g, Watts.Value.ToString("0.0") + " W", Theme.Stat, Theme.Text, 20, 170);
+                Theme.Str(g, "over " + Minutes + " min on battery", Theme.Small, Theme.Mute, 78, 176);
             }
             else
             {
-                Theme.Str(g, "Not measured yet", Theme.Body, Theme.Dim, 20, 140);
-                Theme.Str(g, "use this mode for five minutes on battery", Theme.Small, Theme.Mute, 20, 162);
+                Theme.Str(g, "Not measured yet", Theme.Body, Theme.Dim, 20, 156);
+                Theme.Str(g, "use this mode for five minutes on battery", Theme.Small, Theme.Mute, 20, 178);
             }
 
             Theme.Str(g, "Read from Windows, not assumed.", Theme.Small, Theme.Mute, 20, Height - 26);
@@ -604,9 +628,10 @@ namespace PowerDial
 
         public TopAppsCard()
         {
-            // Four rows at 22px from y=72, then the footnote: 168 put the footnote on top
-            // of the fourth row.
-            Height = 206;
+            // Four rows at 22px, then the footnote: 168 put the footnote on top of the
+            // fourth row. The height tracks ModeSummaryCard beside it - two cards in a row
+            // at different heights read as one of them having failed to finish.
+            Height = 228;
             AccessibleRole = AccessibleRole.Grouping;
 
             SeeAll.Text = "See all";
@@ -655,7 +680,7 @@ namespace PowerDial
             const int FigW = 74;
             int barMax = Math.Max(30, Width - 40 - NameW - FigW - 16);
 
-            int y = 72;
+            int y = 80;
             for (int i = 0; i < Rows.Count && i < 4; i++)
             {
                 Row r = Rows[i];
@@ -720,11 +745,16 @@ namespace PowerDial
             Height = 178;
             AccessibleRole = AccessibleRole.Grouping;
 
+            // Not "Undo that change": this restores every setting the app has ever
+            // written, not only the last one, and a button that says otherwise is lying
+            // about its blast radius. It is the same thing the Original settings card on
+            // Power modes does, named the same way so they read as one action.
+            //
             // No glyph: the icon font is not reliably present on every install, and an
-            // empty square beside "Undo" reads as a broken button.
-            Undo.Text = "Undo that change";
+            // empty square beside a label reads as a broken button.
+            Undo.Text = "Back to original settings";
             Undo.BackColor = Theme.Panel;
-            Undo.Size = new Size(168, 34);
+            Undo.Size = new Size(206, 34);
             Undo.Visible = false;
             Controls.Add(Undo);
         }
@@ -841,6 +871,16 @@ namespace PowerDial
         public readonly List<Row> Rows = new List<Row>();
         public string Empty = "";
 
+        /// <summary>
+        /// Over what stretch of time all of this was recorded.
+        ///
+        /// The per-row minutes say how much measurement is behind each figure, which is
+        /// not the same question: 16 minutes of Balanced gathered this afternoon and 16
+        /// gathered across three weeks are worth different amounts of trust, and only the
+        /// span tells them apart.
+        /// </summary>
+        public string Recorded = "";
+
         const int Pitch = 34;
         const int FirstRowY = 84;      // not "Top": Control has one of those
 
@@ -944,11 +984,164 @@ namespace PowerDial
                 y += Pitch;
             }
 
-            if (best >= 0)
-                Theme.Str(g, "Cheapest so far: " + Rows[best].Name + ".", Theme.Small, Theme.Mute, 20, Height - 26);
+            string foot = "Cheapest so far: " + Rows[best].Name + ".";
+            if (Recorded.Length > 0) foot += "   ·   " + Recorded;
+            Theme.Str(g, foot, Theme.Small, Theme.Mute, 20, Height - 26);
         }
 
         static string Hrs(double h)
+        {
+            int t = (int)Math.Round(Math.Max(0, h) * 60);
+            return (t / 60) + "h " + (t % 60).ToString("00") + "m";
+        }
+    }
+
+    /// <summary>
+    /// Two bars: what this laptop drew on the settings it arrived with, against what it
+    /// draws on the mode in use now.
+    ///
+    /// Deliberately not the Insights ranking in miniature. That card lists every mode to
+    /// answer "which one should I pick"; this one shows exactly two to answer the only
+    /// question Overview is for - "is any of this worth it". So it carries a verdict in
+    /// hours-a-charge, which the ranking does not, and it refuses to list the modes you
+    /// are not in, which the ranking exists to do.
+    ///
+    /// Both sides are measured on this machine. Until each has enough recorded minutes it
+    /// says what is missing and how to get it, rather than showing a difference between a
+    /// number and a guess.
+    /// </summary>
+    public sealed class OriginalCompareCard : Card
+    {
+        public sealed class Side
+        {
+            public string Name = "";
+            public bool Known;
+            public double Watts;
+            public int Minutes;
+            public double? Hours;
+        }
+
+        public readonly Side Base = new Side();
+        public readonly Side Now = new Side();
+
+        /// <summary>The headline. Empty means there is nothing measurable to say yet.</summary>
+        public string Verdict = "";
+        public Color VerdictColor = Theme.Text;
+
+        /// <summary>What to do about it when there is no verdict, or the recorded span
+        /// when there is.</summary>
+        public string Note = "";
+
+        public readonly PillButton SeeAll = new PillButton();
+
+        const int Pitch = 34;
+        const int FirstRowY = 128;
+
+        public OriginalCompareCard()
+        {
+            Height = 232;
+            AccessibleRole = AccessibleRole.Grouping;
+
+            SeeAll.Text = "See all modes";
+            SeeAll.BackColor = Theme.Panel;
+            SeeAll.Size = new Size(142, 34);
+            Controls.Add(SeeAll);
+        }
+
+        public void Describe()
+        {
+            string s = "Compared with your original settings. ";
+            s += Verdict.Length > 0 ? Verdict + ". " : "";
+            s += Say(Base) + Say(Now) + Note;
+            AccessibleName = s;
+        }
+
+        static string Say(Side d)
+        {
+            if (d.Name.Length == 0) return "";
+            if (!d.Known) return d.Name + ", not measured yet. ";
+            return d.Name + ", " + d.Watts.ToString("0.0") + " watts over " + d.Minutes + " minutes. ";
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            SeeAll.Location = new Point(Math.Max(24, Width - SeeAll.Width - 20), 18);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Graphics g = e.Graphics;
+            Theme.Quality(g);
+
+            Theme.Str(g, "Compared with your original settings", Theme.Section, Theme.Text, 20, 20);
+            Theme.Str(g, "How this laptop was set up before PowerDial, against the mode you are " +
+                         "using now. Both measured here.",
+                      Theme.Small, Theme.Mute, 20, 46);
+
+            Theme.Str(g, Verdict.Length > 0 ? Verdict : "Not enough recorded yet",
+                      Theme.Stat, Verdict.Length > 0 ? VerdictColor : Theme.Dim, 20, 78);
+
+            // Scaled against the thirstier of the two, so the longer bar is the one
+            // costing more - the same reading as every other bar in the app.
+            double max = 0;
+            if (Base.Known && Base.Watts > max) max = Base.Watts;
+            if (Now.Known && Now.Watts > max) max = Now.Watts;
+            if (max <= 0) max = 1;
+
+            // One track width for both rows, measured against the wider of the two figures
+            // rather than assumed from a constant. A fixed column was too narrow for
+            // "15.6 W · 2h 48m a charge · 109 min", so the bar ran underneath it - and
+            // sizing each row to its own figure would have been worse, because two bars of
+            // different lengths are only comparable on the same track.
+            string figA = Figure(Base), figB = Figure(Now);
+            float figW = Math.Max(Theme.TextW(g, figA, Theme.Small), Theme.TextW(g, figB, Theme.Small));
+            int barMax = Math.Max(30, (int)(Width - 20 - figW - 20 - (20 + NameW)));
+
+            bool better = Base.Known && Now.Known && Now.Watts < Base.Watts - 0.15;
+            bool worse = Base.Known && Now.Known && Now.Watts > Base.Watts + 0.15;
+
+            Bar(g, FirstRowY, Base, figA, max, barMax, Theme.Data);
+            Bar(g, FirstRowY + Pitch, Now, figB, max, barMax,
+                better ? Theme.Save : (worse ? Theme.Spend : Theme.Data));
+
+            if (Note.Length > 0)
+                Theme.Str(g, Note, Theme.Small, Theme.Mute, 20, Height - 30);
+        }
+
+        const int NameW = 158;
+
+        static string Figure(Side d)
+        {
+            if (!d.Known) return "";
+            string fig = d.Watts.ToString("0.0") + " W";
+            if (d.Hours.HasValue) fig += "   ·   " + Hm(d.Hours.Value) + " a charge";
+            return fig + "   ·   " + d.Minutes + " min";
+        }
+
+        void Bar(Graphics g, int y, Side d, string fig, double max, int barMax, Color c)
+        {
+            if (d.Name.Length == 0) return;
+
+            Theme.Str(g, d.Name, Theme.Body, Theme.Text, 20, y);
+
+            if (!d.Known)
+            {
+                Theme.Str(g, "not measured yet", Theme.Small, Theme.Mute, 20 + NameW, y + 3);
+                return;
+            }
+
+            Rectangle track = new Rectangle(20 + NameW, y + 5, barMax, 9);
+            Theme.FillRound(g, track, 4, Theme.Inset);
+            int bw = (int)Math.Round(d.Watts / max * barMax);
+            if (bw < 2) bw = 2;
+            Theme.FillRound(g, new Rectangle(track.X, track.Y, bw, 9), 4, c);
+
+            Theme.StrRight(g, fig, Theme.Small, Theme.Dim, Width - 20, y + 3);
+        }
+
+        internal static string Hm(double h)
         {
             int t = (int)Math.Round(Math.Max(0, h) * 60);
             return (t / 60) + "h " + (t % 60).ToString("00") + "m";

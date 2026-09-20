@@ -240,7 +240,8 @@ namespace PowerDial
             if (!HasBattery) { AccessibleName = "This PC has no battery"; return; }
             string s = ChargePct + "% charge, " + (OnAc ? "plugged in" : "on battery");
             if (HoursLeft.HasValue) s += ". About " + Hm(HoursLeft.Value) + " left";
-            if (Watts.HasValue) s += ". Using " + Watts.Value.ToString("0.0") + " watts";
+            if (OnAc) s += ". Draw is not measured on mains";
+            else if (Watts.HasValue) s += ". Using " + Watts.Value.ToString("0.0") + " watts";
             if (Health.HasValue) s += ". Battery health " + Health.Value.ToString("0") + "%";
             AccessibleName = s;
         }
@@ -308,14 +309,22 @@ namespace PowerDial
             // "16 s" in the place a wattage goes reads as the answer to "how much am I
             // using" - so the figure stays a dash until there is one, and the countdown
             // goes in the sentence underneath where it belongs.
-            string draw = Watts.HasValue ? Watts.Value.ToString("0.0") + " W" : "--";
-            string drawNote = Watts.HasValue
-                ? "Averaged over the last minute, measured on this laptop."
-                : (MeasuringLeft > 0
-                    ? "Measuring: the first reading lands in " + MeasuringLeft + " seconds."
-                    : "Measuring how much power this laptop draws.");
+            //
+            // Draw is timed from the battery's own energy counter, so on mains there is
+            // nothing to time. It used to say "Measuring how much power this laptop
+            // draws" the whole time you were plugged in, which is a claim about work that
+            // is not happening - the same mistake "Time left" already avoids by saying
+            // Paused.
+            string draw = OnAc ? "--" : (Watts.HasValue ? Watts.Value.ToString("0.0") + " W" : "--");
+            string drawNote = OnAc
+                ? "Nothing to measure on mains - draw is timed from the battery itself."
+                : (Watts.HasValue
+                    ? "Averaged over the last minute, measured on this laptop."
+                    : (MeasuringLeft > 0
+                        ? "Measuring: the first reading lands in " + MeasuringLeft + " seconds."
+                        : "Measuring how much power this laptop draws."));
             Figure(g, x + col, "Using now", draw, drawNote,
-                   Watts.HasValue ? Theme.Text : Theme.Dim, col);
+                   (!OnAc && Watts.HasValue) ? Theme.Text : Theme.Dim, col);
 
             if (Health.HasValue)
             {

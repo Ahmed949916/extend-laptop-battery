@@ -64,6 +64,11 @@ namespace PowerDial
         /// <summary>Preset.Code of the profile the machine currently matches, 0 for custom.
         /// Read from the machine after any change, and written into every history point.</summary>
         int _modeCode;
+
+        // What the mode in effect has measured here, worked out by RefreshBasic on its
+        // once-a-minute pass over the history so the 15-second poll does not have to.
+        double? _modeCardWatts;
+        int _modeCardMinutes;
         Label _wattsTotal;          // the measured figure the list is describing
         readonly Dictionary<string, Control> _sections = new Dictionary<string, Control>();
         Readout _readout;
@@ -186,6 +191,12 @@ namespace PowerDial
                 PushSample();
                 RefreshReadout();
                 RefreshProcesses();
+
+                // Overview carries the live watts figure, and it used to be refreshed
+                // only from MaybeRecord - which runs once a minute. So three of every
+                // four battery readings were taken, computed and thrown away, and
+                // "Using now" could sit up to a minute behind the machine.
+                RefreshOverview();
                 MaybeRecord();
 
                 // CPU is a delta, so the sample taken during startup carried memory
@@ -207,6 +218,16 @@ namespace PowerDial
                 if (left == _readout.MeasuringLeft) return;
                 _readout.MeasuringLeft = left;
                 _readout.Invalidate();
+
+                // The readout this was written for is retired and never shown. The
+                // countdown it drives is on Overview now, and a countdown that only moves
+                // when the poll happens to fire is worse than none - it reads as hung.
+                if (_cardStatus != null && _page == "overview")
+                {
+                    _cardStatus.MeasuringLeft = left;
+                    _cardStatus.Describe();
+                    _cardStatus.Invalidate();
+                }
             };
             _tick.Start();
 
@@ -1435,18 +1456,13 @@ namespace PowerDial
             _cardMode.Known = pr != null;
             _cardMode.Mode = pr == null ? "" : (pr.Friendly ?? pr.Name);
 
-            // The card had an empty lower half; what this mode has actually cost is the
-            // most useful thing that can go in it, and it is already measured.
-            _cardMode.Watts = null;
-            _cardMode.Minutes = 0;
-            if (pr != null)
-            {
-                List<HistPoint> mine = new List<HistPoint>();
-                foreach (HistPoint h in History.All()) if (h.M == pr.Code) mine.Add(h);
-                RuntimeAverage ra = RuntimeAverage.From(mine);
-                _cardMode.Minutes = ra.Minutes;
-                if (ra.Known && ra.Minutes >= 5) _cardMode.Watts = ra.Watts;
-            }
+            // What this mode has actually cost, from the last pass over the history
+            // rather than a fresh one. This method now runs on every 15-second poll, and
+            // re-reading two months of JSON four times a minute to redraw a figure that
+            // changes once a minute is not a trade worth making. RefreshBasic works the
+            // same numbers out for the comparison card and leaves them here.
+            _cardMode.Watts = _modeCardWatts;
+            _cardMode.Minutes = _modeCardMinutes;
             _cardMode.Blurb = pr == null
                 ? "These settings do not match any mode. Something changed them in Windows or another app."
                 : pr.Blurb;
@@ -1685,6 +1701,11 @@ namespace PowerDial
             string nowName = NameOfMode(_modeCode);
             nowSide.Name = nowName ?? "Your settings now";
             Fill(nowSide, hist, _modeCode);
+
+            // The Overview mode card wants exactly this, and the pass has already been
+            // made - so it is handed over rather than measured twice.
+            _modeCardWatts = nowSide.Known ? (double?)nowSide.Watts : null;
+            _modeCardMinutes = nowSide.Minutes;
 
             _cardVsOriginal.Verdict = "";
             _cardVsOriginal.VerdictColor = Theme.Text;

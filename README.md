@@ -14,50 +14,65 @@ On a desktop the battery panels stand down and the rest carries on.
 
 ## Run it
 
-Double-click **PowerDial** on the Desktop, or run `PowerDial.exe` in this folder.
+Double-click `PowerDial.exe` in this folder, or the shortcut if you made one.
 
 Closing the window hides it to the notification area. Right-click the tray icon for the
-presets, **Restore original settings**, or **Quit**. Only one instance runs at a time.
+profiles, **Original settings**, **Open PowerDial** or **Quit PowerDial** - quitting is the
+only one that actually ends it. Only one instance runs at a time; launching a second copy
+raises the window that already exists rather than starting another.
 
-## Two modes
+## Pages
 
-**Basic** is what opens the first time. One card:
+A sidebar down the left, six entries, nothing hidden behind a mode. The app opens on
+**Overview** every time rather than restoring whichever page you closed on.
 
-- **Four modes** — *Max battery*, *Battery saver*, *Balanced*, *Performance*. One click
-  each, battery side only, and it says which one is in effect right now. They are the same
-  four profiles Advanced lists under *Profiles*, named for reading rather than for tuning -
-  pick one there and Basic shows it selected too.
-- **What is costing you battery life**, and a button that fixes it. Undo puts it all back.
-- **What each mode has actually cost you** — the measured average draw recorded while that
-  mode was in effect, and what it works out to per charge. This is the useful part and it
-  fills in as you use the laptop: pick a mode, use it for a while, pick another, and after
-  a few sessions you have a real comparison from your own machine rather than a claim from
-  a review site. A mode with too little recorded says *not measured yet* rather than
-  showing a number it has not earned.
-- **What the last change was worth**, in watts and in extra hours per charge.
+**Overview** - the one screen that answers "is anything wrong, and what should I do".
+The battery stated once; the single most worthwhile change with a button that makes it;
+what your current settings are worth against the ones this laptop started with; the mode in
+effect; and what is keeping the processor busy.
 
-Every figure there is measured on your machine. Nothing is predicted, and where there is
-not enough data yet it says so instead of guessing.
+**Power modes** - five cards, each stating the trade in a sentence, listing what it
+actually changes, and showing what it measured **here**. *Max battery*, *Battery saver*,
+*Balanced*, *Performance*, and **Original settings** - how this laptop was set up before
+PowerDial wrote anything, read from the restore point captured on first run. That last one
+is a profile like any other: you can pick it, it lights up when you are on it, and minutes
+recorded while you are get grouped under it, which is what makes the comparison on Overview
+and Insights possible at all.
 
-**Advanced** is the full instrument: every power setting, the suggestions list, the charts,
-the process telemetry and the GPU watch. Switch at the top of the window; it is remembered.
+**Insights** - what your last change was worth, in watts and in hours per charge; what each
+mode has cost, ranked, with the span the recording covers; the draw and charge charts; the
+apps using the most power; and the cumulative per-process tally across every session.
+
+**Advanced** - every individual power setting with what it does and what it costs, plus the
+full list of what is worth changing.
+
+**Battery health** - how much charge the pack still holds against what it shipped with, and
+the one honest thing there is to say about wear: nothing in this app or in Windows gives
+back capacity that is already gone.
+
+**Diagnostics** - the GPU watch, the activity log, and **Run as admin** for the few settings
+that need it.
+
+Every figure on every page is measured on your machine. Nothing is predicted, and where
+there is not enough recorded yet it says so instead of guessing.
 
 ## Layout
 
     control-battery\
-      PowerDial.exe             the app - run this
-      PowerDial.dll             plus the .json files, System.Management.dll, runtimes\
+      PowerDial.exe             the app - run this. One self-contained file.
       PowerDial.slnx            solution: both projects
       global.json               pins the .NET SDK
       Directory.Build.props     build settings shared by both projects
       Directory.Packages.props  package versions, centrally
       README.md                 this file
       CLAUDE.md                 the working brief for changing it
+      scripts\publish.ps1       build, replace PowerDial.exe, start it
+      scripts\sign.ps1          Authenticode signing
       src\PowerDial\            source
       src\PowerDial-selftest\   read-only checks against the live machine
 
-    Desktop\PowerDial.lnk       shortcut to the exe
-    Desktop\PowerDial.exe       the portable single-file copy, if you built one
+`bin\` and `obj\` are throwaway and git-ignored. They used to be committed - if you are
+looking at an old clone, `git rm -r --cached` them.
 
 ## Building
 
@@ -65,27 +80,31 @@ Needs the **.NET 10 SDK**. `global.json` pins it to 10.0.400 and rolls forward w
 feature band, so a newer 10.0.4xx SDK is fine and a .NET 8 or 9 SDK is refused with a clear
 message rather than a strange build error.
 
-    dotnet build -c Release          from the repo root - builds both projects
+    .\scripts\publish.ps1
 
-To rebuild the copy in this folder, publish somewhere else and copy it in:
+That is the whole thing, from any clone on any Windows PC. It builds, replaces
+`PowerDial.exe` at the repo root, prints the new timestamp, and starts the app. It also
+stops a running copy first, since a running one locks the exe and its single-instance mutex
+would make the new one exit silently anyway - and it tells you what to do when it cannot,
+which happens whenever the running copy is elevated.
 
-    cd src\PowerDial
-    dotnet publish -c Release -o %TEMP%\pd-publish
-    copy /y %TEMP%\pd-publish\* ..\..
+    .\scripts\publish.ps1 -SelfContained    # bundle the runtime: larger, runs without .NET
+    .\scripts\publish.ps1 -NoRun            # build and replace, do not start it
+    .\scripts\publish.ps1 -Configuration Debug
 
-**Do not publish straight into the repo root.** `dotnet publish -o ..\..` fails with
-`CS5001: Program does not contain a static 'Main'` - the SDK excludes everything under the
-publish directory from compilation, so pointing it at the repo root hides the source from
-the compiler. Quit the running copy first or the copy fails on a locked file.
+For a plain compile without replacing anything:
 
-To build the portable single-file copy - one 49 MB `.exe` with the runtime inside it, which
-runs on a PC with no .NET installed:
+    dotnet build -c Release
 
-    cd src\PowerDial
-    dotnet publish -c Release -r win-x64 --self-contained true -o %TEMP%\pd-portable ^
-      -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+**Do not publish into the repo root.** `dotnet publish -o .` fails with `CS5001: Program
+does not contain a static 'Main'`. The SDK excludes its own output directory from source
+globbing, and the root is an ancestor of `src\PowerDial`, so every `.cs` file gets excluded
+and nothing compiles. The script publishes to `.publish\` and copies one file up.
 
-The `bin` and `obj` directories under `src` are throwaway and are git-ignored.
+**`dotnet build` does not update `PowerDial.exe`.** It refreshes `bin\`. The exe people
+double-click is the published single file at the root, and that only changes when you
+publish - so building and then running the old exe looks exactly like a change that did
+nothing. Use the script.
 
 ### Signing
 
@@ -121,25 +140,37 @@ battery's own energy counter over a 60-second window. That means:
   reflects the new state instead of averaging across the change
 
 **Profiles.** Longest / Endurance / Balanced / Full speed - shown as *Max battery* /
-*Battery saver* / *Balanced* / *Performance*, the same names and the same four buttons
-Basic mode offers. *Balanced* is the configuration that actually measured **6.92 W
-(6h21m)**. All of them write the **on-battery side only**; a profile never touches
-plugged-in behaviour.
+*Battery saver* / *Balanced* / *Performance*. *Balanced* is the configuration that actually
+measured **6.92 W (6h21m)** here. All of them write the **on-battery side only**; a profile
+never touches plugged-in behaviour.
 
-**Restore my settings.** Puts back the battery settings as they stood before PowerDial
-existed. The snapshot is taken on first run; since the app writes nothing until you touch
-a control, that first-run state *is* the pre-app state. It lives in
-`%LOCALAPPDATA%\PowerDial\baseline.json`, and if it is ever missing there is a built-in
-fallback: the configuration verified by hand during the tuning session.
+**Original settings.** A fifth profile, and the way back. It is how this laptop was set up
+before PowerDial wrote anything: the snapshot is taken on first run, before the UI is
+built, and since the app writes nothing until you touch a control, that first-run state
+*is* the pre-app state. It lives in `%LOCALAPPDATA%\PowerDial\baseline.json`, written once
+and never overwritten, so it survives restarts, updates and reinstalls.
+
+None of it is hard-coded, because it cannot be - every machine's defaults differ, and a
+"factory default" written into the source would be exactly the borrowed number this app
+refuses to show. Choosing it restores both sides of every setting, not just the battery
+side, and puts back whether each value was stored in the scheme or inherited from a Windows
+default. That is why it calls the restore rather than writing the values like an ordinary
+profile would.
+
+Because it is a profile with its own history code, minutes recorded while you are on it
+group under it like any other mode - which is what makes *Compared with your original
+settings* on Overview, and its row in the mode ranking, possible at all. It starts empty on
+an install that predates it: history recorded before the profile existed filed those
+minutes as a custom mix, and that cannot be backfilled honestly.
 
 Restoring a value that was previously *inherited* rather than stored makes it explicit.
 The behaviour is identical, only the bookkeeping differs, and the activity log says so
 rather than glossing over it.
 
 **Settings, split by whether they matter.** The main list holds the five that change how
-much power you draw while using the machine. Timeouts and lid behaviour — which change
-nothing while you are actually working — are tucked into a collapsed **Basic settings**
-section rather than removed.
+much power you draw while using the machine. Timeouts and lid behaviour - which change
+nothing while you are actually working - are tucked into a collapsed section rather than
+removed.
 
 **An info icon on every setting and every section**, explaining in plain terms what it
 does, what it costs, and which figures were measured rather than assumed.
@@ -156,9 +187,16 @@ restarts rather than starting from nothing each launch:
 - *Since recording began* - the cumulative tally. Which process has actually burned the
   most CPU across every session, which is the one costing you runtime. This is the view
   that named `OneDrive.Sync.Service` as the top consumer here.
-- *Where your watts go* - which processes were busiest while the reading was timed.
-- *Battery health* - 43.9 Wh still held against the 70.6 Wh it shipped with, and what the
-  missing capacity costs you in hours at the present draw.
+- *What your last change was worth* - the average measured before the change against the
+  average measured since, in watts and in hours per charge.
+- *What each mode has cost you* - every profile ranked by what it actually drew here, with
+  the recorded minutes behind each and the span they were gathered over.
+
+**Battery health**, on its own page: how much charge the pack still holds against what it
+shipped with, and what the missing capacity costs you in hours at the present draw. It is a
+fact about the hardware rather than a record of your usage, it changes over months rather
+than minutes, and nothing in the app can act on it - so it says that plainly instead of
+implying a setting somewhere could undo wear.
 
 *Background* means no instance of that process owns a visible window. Those are the ones
 worth questioning, because you are not the one using them.
@@ -221,35 +259,42 @@ something the selftest checks — verify it by hand if you change startup.
 
 ## Interface
 
-Dark instrument panel rather than a settings dialog. Bahnschrift Condensed — Windows' DIN
-derivative, an engineering face — carries anything numeric; Segoe UI Variable carries the
+Dark instrument panel rather than a settings dialog. Bahnschrift Condensed - Windows' DIN
+derivative, an engineering face - carries anything numeric; Segoe UI Variable carries the
 prose; Cascadia Mono the log.
 
-Two accents, and both mean something rather than decorate: **amber is energy leaving,
-green is energy kept**, and the readout switches between them based on the actual
-measurement. The signature is the **sparkline**: this whole exercise was about watching a
-number move over a window rather than trusting a spec, so the header shows the real recent
-history instead of a lone digit.
+**A sidebar, and nothing else that navigates.** It replaced two strips that looked alike
+and did different things: a Basic/Advanced switch that decided what *existed*, and a
+section bar three hundred pixels below it that only scrolled. One list now, and every
+section is one click from every other. The current entry carries a bar and a heavier label
+as well as a colour, so "you are here" never rests on colour alone.
 
-The header is **pinned**, and under the trace it carries the figure the live reading cannot
-give you: the average draw actually recorded on this machine, and how long a full charge
-lasts at it. The 60-second number answers "what am I drawing this minute" and swings by
-several watts as the CPU breathes; the average answers "how long does this thing last".
-Both are measurements — see `Runtime.cs` — and the band says how many recorded minutes it
-is standing on, so a four-minute average cannot pass itself off as a runtime estimate.
+**Three accents, each meaning one thing.** *Amber is energy leaving* - draw figures, the
+thirstiest mode's bar, the capacity a worn pack has lost. *Green is energy kept* - a
+measured saving, the mode in use, the cheapest mode recorded. *Yellow says where you are* -
+the page title and the current sidebar entry, and nothing else. Green was doing double duty
+as "selected" until the yellow arrived, which spent an accent that should only ever mean a
+saving.
 
-Under the header, also pinned, is *Where your watts go* — the processes that were busiest
-across the same window the draw figure was timed over, so the two can be read against each
-other. It is deliberately core-seconds and never watts-per-process: splitting a measured
-total by CPU share would be a made-up number, and it would point at the wrong thing, since
-whatever is holding a discrete GPU awake costs upwards of 17 W while using almost no CPU.
+**Nothing is pinned above the column.** A header instrument and a processes strip used to
+be, costing about 300 px of permanent chrome on every page, including the ones that had
+nothing to do with either - and between them they stated the charge, the draw and the time
+left twice on the same screen. Overview says all of it once, and the full process ranking
+lives on Insights.
 
-Below both, a bar of section buttons scrolls the column; nothing is hidden behind a tab.
+**Measurements name their own provenance.** A figure is never shown without the recorded
+minutes behind it, and Insights states the span those minutes are drawn from - sixteen
+minutes gathered this afternoon and sixteen gathered over three weeks are worth different
+amounts of trust. Processes are ranked in core-seconds and never watts-per-process:
+splitting a measured total by CPU share would be a made-up number, and it would point at
+the wrong thing, since whatever is holding a discrete GPU awake costs upwards of 17 W while
+using almost no CPU.
 
 Every interactive control is custom-drawn, because stock Win32 widgets cannot be made to
-look like this and, in the case of `TrackBar`, actively misbehave: a focused one
-swallows the mouse wheel and moves its own thumb, so scrolling the window would rewrite a
-power setting. Every control here refuses the wheel.
+look like this and, in the case of `TrackBar`, actively misbehave: a focused one swallows
+the mouse wheel and moves its own thumb, so scrolling the window would rewrite a power
+setting. Every control here refuses the wheel. Everything is keyboard-reachable and names
+itself to a screen reader, including the painted cards, which are otherwise silent.
 
 ## Files
 
@@ -261,7 +306,7 @@ power setting. Every control here refuses the wheel.
 | `Battery.cs` | WMI battery sampling and the watts calculation |
 | `GpuWatch.cs` | discrete-GPU waker detection |
 | `Baseline.cs` | the restore point |
-| `Presets.cs` | the four profiles |
+| `Presets.cs` | the four designed profiles, and Original settings read from the restore point |
 | `Advisor.cs` | the suggestions: what is wrong right now, and what fixes it |
 | `Charts.cs` | the charts and the process table |
 | `ProcessWatch.cs` | live per-process CPU and memory sampling |
@@ -271,7 +316,9 @@ power setting. Every control here refuses the wheel.
 | `Runtime.cs` | the measured average draw, and the runtime it implies |
 | `Theme.cs` | palette, type, drawing helpers |
 | `Widgets.cs` | Card, PillButton, Slider, Picker, InfoDot, SectionToggle, Sparkline, SteadyPanel |
-| `MainForm.cs` | window and readout |
+| `Shell.cs` | the sidebar and the battery summary under it |
+| `Pages.cs` | the page cards: status, advice, mode summary, top apps, saving, mode cost, original-vs-now |
+| `MainForm.cs` | the window, the pages, and everything that refreshes them |
 
 ## Tests
 

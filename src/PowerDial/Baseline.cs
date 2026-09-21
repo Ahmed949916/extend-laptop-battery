@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -150,6 +150,22 @@ namespace PowerDial
             File.WriteAllText(FilePath, JsonSerializer.Serialize(bf, PrettyJson.Default.BaselineFile));
         }
 
+        /// <summary>
+        /// Remove the restore point. Only ever called after a verified restore - see the
+        /// overload above - because without it there is no way back to the pre-app state.
+        /// The next launch captures a new one from whatever the settings are then, which
+        /// after a restore is exactly the original.
+        /// </summary>
+        public static bool Delete()
+        {
+            try
+            {
+                if (File.Exists(FilePath)) File.Delete(FilePath);
+                return true;
+            }
+            catch (Exception ex) { Diag.WriteFailed("the deleted restore point (baseline.json)", ex); return false; }
+        }
+
         public static BaselineFile Load()
         {
             try
@@ -173,6 +189,20 @@ namespace PowerDial
 
         /// <summary>Re-applies the snapshot. Returns log lines describing each write.</summary>
         public static List<string> Restore()
+        {
+            int ignored;
+            return Restore(out ignored);
+        }
+
+        /// <summary>
+        /// The same, reporting how many writes could not be verified.
+        ///
+        /// A caller that is about to delete this snapshot has to know: the file is the
+        /// only record of what the settings were before this app existed, so throwing it
+        /// away while some of them are still unrestored would strand the machine on
+        /// PowerDial's values with nothing left to go back to.
+        /// </summary>
+        public static List<string> Restore(out int failedWrites)
         {
             List<string> log = new List<string>();
             BaselineFile bf = Load();
@@ -216,6 +246,7 @@ namespace PowerDial
             }
 
 
+            failedWrites = failed;
             log.Add(ok + " restored on battery, " + acOk + " plugged in, " + failed + " failed.");
             if (acSkipped > 0)
                 log.Add(acSkipped + " setting(s) had no plugged-in value recorded - this restore point " +

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -65,6 +65,16 @@ namespace PowerDial
                     TrimIfLarge();
                 }
                 catch (Exception ex) { Diag.WriteFailed("the activity log (activity.log)", ex); }
+            }
+        }
+
+        /// <summary>Throw the log away. The next line written starts a new file.</summary>
+        public static void Clear()
+        {
+            lock (Gate)
+            {
+                try { if (File.Exists(FilePath)) File.Delete(FilePath); }
+                catch (Exception) { }     // nowhere left to report it to
             }
         }
 

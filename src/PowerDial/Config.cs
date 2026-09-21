@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text.Json;
 
@@ -87,6 +87,25 @@ namespace PowerDial
                     File.WriteAllText(Path, JsonSerializer.Serialize(c, PrettyJson.Default.Config));
                 }
                 catch (Exception ex) { Diag.WriteFailed("what has been measured on this PC (config.json)", ex); }
+            }
+        }
+
+        /// <summary>
+        /// Forget everything measured on this PC and start from defaults.
+        ///
+        /// This is the file that makes the app know anything about your machine - what it
+        /// drew before the last change, what an awake discrete GPU costs here, the design
+        /// capacity when the firmware lies about it. All of that is measured, none of it
+        /// is recoverable, and that is the point of asking twice before calling this.
+        /// </summary>
+        public static void Reset()
+        {
+            lock (Gate)
+            {
+                _current = new Config();
+                _current.WindowSeconds = 60;
+                try { if (File.Exists(Path)) File.Delete(Path); }
+                catch (Exception ex) { Diag.WriteFailed("the cleared settings (config.json)", ex); }
             }
         }
 

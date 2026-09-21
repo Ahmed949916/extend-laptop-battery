@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
@@ -7,9 +7,23 @@ namespace PowerDial
 {
     static class Program
     {
+        /// <summary>
+        /// Passed by a copy that is replacing this one - Run as admin, or the reset.
+        /// Without it the new process races the old one for the single-instance mutex,
+        /// loses, and exits silently, which looks exactly like the app failing to
+        /// restart. With it, it waits for the old one to let go.
+        /// </summary>
+        const string WaitFlag = "--wait";
+
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            bool waitForTheOldCopy = false;
+            if (args != null)
+                foreach (string a in args)
+                    if (string.Equals(a, WaitFlag, StringComparison.OrdinalIgnoreCase))
+                        waitForTheOldCopy = true;
+
             // A tray app that dies silently is a tray app you cannot debug. Anything
             // unhandled gets written next to the settings snapshot and shown once.
             AppDomain.CurrentDomain.UnhandledException += (s, e) => Report(e.ExceptionObject as Exception, "domain");
@@ -20,6 +34,15 @@ namespace PowerDial
             bool created;
             using (Mutex mtx = new Mutex(true, "PowerDial.SingleInstance", out created))
             {
+                if (!created && waitForTheOldCopy)
+                {
+                    // Fifteen seconds is far longer than an orderly exit takes, and the
+                    // alternative to waiting is a restart that silently does nothing.
+                    try { created = mtx.WaitOne(TimeSpan.FromSeconds(15)); }
+                    catch (AbandonedMutexException) { created = true; }   // it died holding it
+                    catch (Exception) { }
+                }
+
                 if (!created)
                 {
                     // Hand the running copy the job of showing itself, rather than telling

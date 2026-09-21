@@ -134,6 +134,7 @@ namespace PowerDial
         DateTime _lastHistory = DateTime.MinValue;
         PillButton _adminBtn;
         Panel _adminBox;            // the Run as admin button and the line explaining it
+        Panel _resetBox;            // start over: restore, wipe, relaunch
         bool _elevated;             // read once: it cannot change without a restart
         readonly List<PillButton> _presetBtns = new List<PillButton>();
 
@@ -889,6 +890,53 @@ namespace PowerDial
                        "command prompt can no longer close it. Use its own window or the tray icon."
             });
             _root.Controls.Add(_adminBox);
+
+            // ---------------------------------------------------------- start over
+            // Last on the last page, which is where something irreversible belongs. It
+            // is not styled as a warning: a red button invites the click it is trying to
+            // discourage. The two dialogs do that work, and they name what goes.
+            _resetBox = new Panel {
+                Width = W, Height = 96, BackColor = Theme.Ink, Margin = new Padding(0, 20, 0, 0)
+            };
+            _resetBox.Controls.Add(new Label {
+                Text = "Start over",
+                Location = new Point(2, 0), Size = new Size(240, 22),
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Ink
+            });
+            _resetBox.Controls.Add(new Label {
+                Text = "Puts your settings back as they were, then deletes everything this app " +
+                       "has recorded and starts it fresh.",
+                Location = new Point(2, 24), Size = new Size(W - 24, 22),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Ink
+            });
+
+            PillButton resetAll = new PillButton {
+                Text = "Reset everything", Location = new Point(0, 52), Width = 180, Height = 36,
+                BackColor = Theme.Ink
+            };
+            resetAll.Click += (s, e) => FactoryReset();
+            _resetBox.Controls.Add(resetAll);
+
+            _resetBox.Controls.Add(new InfoDot {
+                Location = new Point(188, 60), BackColor = Theme.Ink,
+                Heading = "Reset everything",
+                Body = "Returns this app to the state it was in before you first ran it, and " +
+                       "returns the machine to the settings it had then.\n\n" +
+                       "It happens in that order on purpose. Your settings are restored from the " +
+                       "restore point first, and only if every write is verified does anything " +
+                       "get deleted - because that restore point is the only record of what your " +
+                       "settings were before this app existed, and throwing it away while some of " +
+                       "them are still PowerDial's would leave you with no way back.\n\n" +
+                       "What goes: every minute of recorded history and both charts, the " +
+                       "cumulative per-process tally, everything measured about this PC, the " +
+                       "activity log, and the restore point itself. What that costs you is the " +
+                       "comparisons - what each mode has cost, what your last change was worth - " +
+                       "which take days of ordinary use to earn back.\n\n" +
+                       "The app restarts when it is done, captures a fresh restore point from the " +
+                       "settings it just put back, and begins recording again from nothing."
+            });
+            _root.Controls.Add(_resetBox);
 
             // Breathing room under the last card. It used to be tagged with whichever
             // section happened to be last in the column, so only that one page had a floor
@@ -3567,7 +3615,10 @@ namespace PowerDial
         {
             try
             {
+                // --wait, because the new copy starts before this one has exited and
+                // would otherwise lose the single-instance race and quit without a word.
                 ProcessStartInfo psi = new ProcessStartInfo(Application.ExecutablePath);
+                psi.Arguments = "--wait";
                 psi.UseShellExecute = true;
                 psi.Verb = "runas";
                 Process.Start(psi);
@@ -3633,6 +3684,100 @@ namespace PowerDial
                 }
             }
             catch (Exception ex) { Log("Could not open the log folder: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// Put the machine and the app back to how they were before any of this.
+        ///
+        /// The order matters more than anything else here. baseline.json is the only
+        /// record of what the settings were before PowerDial existed, so it is used
+        /// first and deleted last - and not deleted at all if a single write could not
+        /// be verified, because at that point the machine is still partly on this app's
+        /// values and the file is the only way back off them.
+        /// </summary>
+        void FactoryReset()
+        {
+            if (MessageBox.Show(
+                    "Reset PowerDial completely?\n\n" +
+                    "Your power settings go back to how they were before this app ran, and " +
+                    "everything it has recorded is deleted:\n\n" +
+                    "  - every minute of history, and both charts\n" +
+                    "  - what each mode has cost, and what your changes were worth\n" +
+                    "  - the cumulative per-process tally\n" +
+                    "  - everything measured about this PC\n" +
+                    "  - the activity log and the restore point\n\n" +
+                    "The measurements take days of ordinary use to earn back. This cannot " +
+                    "be undone.",
+                    "Reset everything", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2) != DialogResult.OK)
+                return;
+
+            if (MessageBox.Show(
+                    "Last check - this deletes " + Fmt(History.DiskBytes()) + " of recorded " +
+                    "measurements and cannot be undone.\n\nGo ahead?",
+                    "Reset everything", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            // Nothing may write to disk between the delete and the exit, or the app
+            // recreates the files it has just removed.
+            _poll.Stop();
+            _tick.Stop();
+            _commit.Stop();
+
+            // ---- settings first, and verified ----
+            int failed;
+            List<string> lines = Baseline.Restore(out failed);
+            foreach (string line in lines) Log(line);
+
+            if (failed > 0)
+            {
+                _poll.Start();
+                _tick.Start();
+                MessageBox.Show(
+                    failed + " setting(s) could not be written back, so nothing has been " +
+                    "deleted.\n\nThe restore point is still here, which means you can still " +
+                    "get back to your original settings - that is exactly why it is not " +
+                    "removed until every one of them has been. The activity log says which " +
+                    "ones failed; some need administrator rights.",
+                    "Reset stopped", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ShowLog();
+                return;
+            }
+
+            // ---- then everything this app knows ----
+            History.DeleteAll();
+            Config.Reset();
+            Baseline.Delete();
+            Activity.Clear();
+
+            // ---- then start again as if new ----
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(Application.ExecutablePath);
+                psi.Arguments = "--wait";
+                psi.UseShellExecute = true;
+                Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Everything was reset, but the app could not restart itself: " + ex.Message +
+                    "\n\nStart it again yourself and it will come up fresh.",
+                    "Reset everything", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
+            _quitting = true;
+            if (_tray != null) _tray.Visible = false;
+            Application.Exit();
+        }
+
+        /// <summary>Bytes as something a person reads.</summary>
+        static string Fmt(long bytes)
+        {
+            if (bytes >= 1048576) return (bytes / 1048576.0).ToString("0.0") + " MB";
+            if (bytes >= 1024) return (bytes / 1024.0).ToString("0") + " KB";
+            return bytes + " bytes";
         }
 
         void ShowLog()

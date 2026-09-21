@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -300,6 +300,38 @@ namespace PowerDial
             else s.MinWatts = 0;
             s.BatteryMinutes = s.BatteryPoints;   // one point per minute
             return s;
+        }
+
+        /// <summary>
+        /// Everything recorded, gone: every month of per-minute points and the cumulative
+        /// tally. Returns how many files went.
+        ///
+        /// The in-memory caches are cleared with them. Leaving them behind would let the
+        /// charts go on drawing months of history off a list whose files no longer exist,
+        /// until something happened to invalidate it.
+        /// </summary>
+        public static int DeleteAll()
+        {
+            int removed = 0;
+            lock (Gate)
+            {
+                _cache = null;
+                _cacheKey = "";
+                _offenders = new Dictionary<string, Offender>();
+                _sinceFlush = 0;
+
+                try
+                {
+                    if (!Directory.Exists(Folder)) return 0;
+                    foreach (string f in Directory.GetFiles(Folder, "*.jsonl"))
+                    {
+                        try { File.Delete(f); removed++; } catch (Exception) { }
+                    }
+                    if (File.Exists(OffendersFile)) { File.Delete(OffendersFile); removed++; }
+                }
+                catch (Exception ex) { Diag.WriteFailed("the cleared history", ex); }
+            }
+            return removed;
         }
 
         /// <summary>Delete month files older than KeepMonths.</summary>

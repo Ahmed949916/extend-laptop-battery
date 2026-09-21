@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
+using System.IO;
 using System.Windows.Forms;
 
 namespace PowerDial
@@ -75,7 +77,7 @@ namespace PowerDial
         Sparkline _spark;
         Panel _basicBox;
         SectionToggle _basicToggle, _logToggle;
-        Panel _logBox;
+        Panel _logBox, _logButtons;
         TextBox _log;
         Panel _watchList, _watchButtons, _watchBox;
         SectionToggle _watchToggle;
@@ -733,17 +735,22 @@ namespace PowerDial
             _watchButtons = new Panel {
                 Location = new Point(14, 228), Size = new Size(W - 30, 38), BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(0, 3), Size = new Size(140, 36) };
+            // These were hand-placed and wrong: "Check again" ran to x=140 while "Open
+            // Windows settings" began at x=134, so they overlapped by six pixels, and the
+            // three were 36, 32 and 32 tall on the same top edge. Laid out in a row now,
+            // from each label's own measured width, on one baseline.
+            PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh };
             recheck.Click += (s, e) => RunBusy(recheck, delegate {
                 RefreshWatch(); Log("Re-checked what could be waking the GPU."); });
-            _watchButtons.Controls.Add(recheck);
-            PillButton opensettings = new PillButton { Text = "Open Windows settings", Location = new Point(134, 3), Size = new Size(184, 32) };
+
+            PillButton opensettings = new PillButton { Text = "Open Windows settings" };
             opensettings.Click += (s, e) => GpuWatch.OpenBackgroundAppsSettings();
-            _watchButtons.Controls.Add(opensettings);
-            PillButton reread = new PillButton { Text = "Re-read everything", Location = new Point(326, 3), Size = new Size(160, 32) };
+
+            PillButton reread = new PillButton { Text = "Re-read everything" };
             reread.Click += (s, e) => RunBusy(reread, delegate {
                 LoadValues(); RefreshWatch(); Log("Re-read every setting from the registry."); });
-            _watchButtons.Controls.Add(reread);
+
+            LayOutRow(_watchButtons, 3, recheck, opensettings, reread);
             _watchCard.Controls.Add(_watchButtons);
 
             _watchBox.Controls.Add(_watchCard);
@@ -753,19 +760,45 @@ namespace PowerDial
             _logToggle = new SectionToggle { Width = W, Caption = "Activity", Sub = "what this app changed", Margin = new Padding(0, 4, 0, 0) };
             _logToggle.Toggled += (s, e) => { _logBox.Visible = _logToggle.Expanded; _root.PerformLayout(); };
             _root.Controls.Add(WithInfo(_logToggle, "Activity",
-                "Everything this app changed, in order, with timestamps.\n\n" +
+                "Everything this app changed, in order, with timestamps. It is kept on disk at " +
+                "%LOCALAPPDATA%\\PowerDial\\activity.log, so it survives closing the app and " +
+                "spans sessions - the entries above the rule are from previous runs.\n\n" +
                 "Each write is read straight back from the registry afterwards. If a value did " +
                 "not stick, this is where it says so and shows what it actually reads, rather " +
                 "than claiming success. It opens by itself when something fails.\n\n" +
                 "Useful when a setting needs administrator rights: the message will say so, and " +
-                "Run as admin restarts the app elevated."));
+                "Run as admin restarts the app elevated.\n\n" +
+                "The file is trimmed to its most recent entries once it passes half a megabyte, " +
+                "which ordinary use never reaches."));
 
-            _logBox = new Panel { Width = W, Height = 150, BackColor = Theme.Ink, Visible = false, Margin = new Padding(0, 0, 0, 8) };
+            _logBox = new Panel { Width = W, Height = 248, BackColor = Theme.Ink, Visible = false, Margin = new Padding(0, 0, 0, 8) };
             _log = new TextBox {
-                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
+                Location = new Point(0, 0), Size = new Size(W, 198),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
                 BackColor = Theme.Inset, ForeColor = Theme.Text, Font = Theme.Mono, BorderStyle = BorderStyle.None
             };
             _logBox.Controls.Add(_log);
+
+            // A troubleshooting record you cannot get out of the window is half a feature.
+            _logButtons = new Panel {
+                Location = new Point(0, 206), Size = new Size(W, 42), BackColor = Theme.Ink,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            PillButton logCopy = new PillButton { Text = "Copy", BackColor = Theme.Ink };
+            logCopy.Click += (s, e) => CopyLog();
+
+            PillButton logSave = new PillButton { Text = "Save to a file", BackColor = Theme.Ink };
+            logSave.Click += (s, e) => SaveLog();
+
+            PillButton logOpen = new PillButton { Text = "Show me the file", BackColor = Theme.Ink };
+            logOpen.Click += (s, e) => RevealLog();
+
+            LayOutRow(_logButtons, 4, logCopy, logSave, logOpen);
+            _logBox.Controls.Add(_logButtons);
+
+            LoadLogTail();
             _root.Controls.Add(_logBox);
 
             // ---------------------------------------------------------- run as admin
@@ -1517,6 +1550,41 @@ namespace PowerDial
                 px += bw + 8;
             }
             return outp;
+        }
+
+        /// <summary>
+        /// Place buttons left to right on one baseline, each as wide as its own label needs
+        /// plus padding, with a consistent gap between them.
+        ///
+        /// Hand-placed Location/Size pairs are how two of these ended up overlapping: the
+        /// numbers were measured once against one set of labels and one font size, and
+        /// nothing re-checked them when either changed.
+        /// </summary>
+        static void LayOutRow(Panel host, int top, params PillButton[] buttons)
+        {
+            const int Gap = 10;
+            const int Pad = 34;          // breathing room either side of the label
+            const int H = 34;
+
+            // Measured off a bitmap, not host.CreateGraphics(): the panel has no parent
+            // and no window handle when this runs, and asking a handleless control for a
+            // Graphics forces one into existence. Same trick RefreshOverview uses to
+            // reflow the advice card before it is in the tree.
+            int x = 0;
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                foreach (PillButton b in buttons)
+                {
+                    int w = (int)Math.Ceiling(Theme.TextW(g, b.Text, Theme.Title)) + Pad;
+                    if (!string.IsNullOrEmpty(b.Glyph)) w += 18;
+                    b.Location = new Point(x, top);
+                    b.Size = new Size(w, H);
+                    host.Controls.Add(b);
+                    x += w + Gap;
+                }
+            }
         }
 
         /// <summary>
@@ -3354,6 +3422,64 @@ namespace PowerDial
             catch (Exception ex) { Log("Did not restart as admin: " + ex.Message); ShowLog(); }
         }
 
+        /// <summary>The whole log onto the clipboard, ready to paste into a message.</summary>
+        void CopyLog()
+        {
+            if (_log == null || _log.TextLength == 0) return;
+            try
+            {
+                Clipboard.SetText(_log.Text);
+                Log("Copied the activity log to the clipboard.");
+            }
+            catch (Exception ex) { Log("Could not copy the log: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// Write it somewhere the person chooses. A copy rather than a move: the log on
+        /// disk goes on being the log, and this is the thing you attach to an email.
+        /// </summary>
+        void SaveLog()
+        {
+            if (_log == null) return;
+            using (SaveFileDialog dlg = new SaveFileDialog())
+            {
+                dlg.Title = "Save the activity log";
+                dlg.Filter = "Log file (*.log)|*.log|Text file (*.txt)|*.txt|All files (*.*)|*.*";
+                dlg.FileName = "PowerDial-activity-" +
+                               DateTime.Now.ToString("yyyy-MM-dd-HHmm", CultureInfo.InvariantCulture) + ".log";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    File.WriteAllText(dlg.FileName, _log.Text);
+                    Log("Saved the activity log to " + dlg.FileName);
+                }
+                catch (Exception ex) { Log("Could not save the log: " + ex.Message); }
+            }
+        }
+
+        /// <summary>
+        /// Open the folder with the log picked out. Useful precisely when the app is the
+        /// thing misbehaving and you would rather read the file than trust the window.
+        /// </summary>
+        void RevealLog()
+        {
+            try
+            {
+                string path = Activity.FilePath;
+                if (File.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"")
+                        { UseShellExecute = true });
+                }
+                else
+                {
+                    Directory.CreateDirectory(Activity.Folder);
+                    Process.Start(new ProcessStartInfo(Activity.Folder) { UseShellExecute = true });
+                }
+            }
+            catch (Exception ex) { Log("Could not open the log folder: " + ex.Message); }
+        }
+
         void ShowLog()
         {
             if (_logToggle != null && !_logToggle.Expanded)
@@ -3365,10 +3491,38 @@ namespace PowerDial
             }
         }
 
+        /// <summary>
+        /// One line into the activity log - on screen and on disk, in that order.
+        ///
+        /// The file is what makes this a record rather than a running commentary: it
+        /// survives the window closing, which is when you generally find out you needed
+        /// it. Appending is best-effort and never throws, so logging a failure cannot
+        /// itself become one.
+        /// </summary>
         void Log(string msg)
         {
+            if (string.IsNullOrEmpty(msg)) return;
+            string line = Activity.Stamp(DateTime.Now) + "  " + msg;
+            if (_log != null) _log.AppendText(line + Environment.NewLine);
+            Activity.Append(line);
+        }
+
+        /// <summary>
+        /// Put the tail of previous sessions above this one's lines, with a rule between
+        /// them - a log that silently mixes last week's writes into today's is worse than
+        /// one that starts empty.
+        /// </summary>
+        void LoadLogTail()
+        {
             if (_log == null) return;
-            _log.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  " + msg + Environment.NewLine);
+
+            List<string> earlier = Activity.Tail(200);
+            if (earlier.Count == 0) return;
+
+            foreach (string line in earlier) _log.AppendText(line + Environment.NewLine);
+            _log.AppendText(new string('-', 68) + Environment.NewLine);
+            _log.AppendText("  this session" + Environment.NewLine);
+            _log.AppendText(new string('-', 68) + Environment.NewLine);
         }
 
         static Icon MakeIcon()

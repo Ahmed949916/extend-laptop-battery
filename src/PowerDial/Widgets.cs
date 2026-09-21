@@ -660,9 +660,9 @@ namespace PowerDial
             SizeF ts = g.MeasureString(t, Theme.Body);
             Theme.Str(g, t, Theme.Body, Theme.Text, 10, (Height - ts.Height) / 2f);
 
-            string chev = _open ? Theme.GlyphChevDown : Theme.GlyphChevRight;
-            SizeF cs = g.MeasureString(chev, Theme.IconSmall);
-            Theme.Str(g, chev, Theme.IconSmall, Theme.Dim, Width - cs.Width - 8, (Height - cs.Height) / 2f);
+            // Same story as the section headers: without this drawn, a Picker is a text
+            // field with no sign that it opens anything.
+            Theme.Chevron(g, Width - 20, Height / 2f, 9f, _open, Theme.Dim);
 
             if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 6);
         }
@@ -1081,14 +1081,13 @@ namespace PowerDial
             Theme.Quality(g);
             g.Clear(BackColor);
             Color c = (_hot || Focused) ? Theme.Text : Theme.Dim;
-            string chev = Expanded ? Theme.GlyphChevDown : Theme.GlyphChevRight;
 
-            // Measured rather than nudged by hand: the offsets here were tuned against a
-            // 13px caption, and type is set in points now, so a fixed offset would drift
-            // the moment the display scaling changed.
-            SizeF cs = g.MeasureString(chev, Theme.IconSmall);
+            // Drawn, not set in Segoe Fluent Icons. That font renders nothing for these
+            // code points on some installs, and a collapsible section whose chevron does
+            // not appear is not a collapsible section - it is a label nobody clicks. Two
+            // lines cannot fail to draw.
             SizeF cap = g.MeasureString(Caption, Theme.Section);
-            Theme.Str(g, chev, Theme.IconSmall, c, 3, (Height - cs.Height) / 2f);
+            Theme.Chevron(g, 5, Height / 2f, 9f, Expanded, c);
             Theme.Str(g, Caption, Theme.Section, Theme.Text, 24, (Height - cap.Height) / 2f);
             if (Sub.Length > 0)
             {
@@ -1098,6 +1097,7 @@ namespace PowerDial
 
             if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 6);
         }
+
     }
 
     /// <summary>

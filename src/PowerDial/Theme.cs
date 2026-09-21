@@ -224,6 +224,36 @@ namespace PowerDial
         /// as well, so it taught you to ignore it. Solid and 2px is the minimum that reads
         /// as an indicator rather than an artefact.
         /// </summary>
+        /// <summary>
+        /// A chevron, centred on (x, cy), pointing down when open and right when shut.
+        ///
+        /// Drawn rather than set in Segoe Fluent Icons. That font renders nothing for
+        /// these code points on some installs - which left every collapsible section
+        /// looking like a plain label and every dropdown looking like a text field, since
+        /// the one mark saying otherwise was not being painted. Two lines cannot fail.
+        /// </summary>
+        public static void Chevron(Graphics g, float x, float cy, float size, bool down, Color c)
+        {
+            float h = size / 2f;
+            using (Pen p = new Pen(c, 1.8f))
+            {
+                p.StartCap = LineCap.Round;
+                p.EndCap = LineCap.Round;
+                p.LineJoin = LineJoin.Round;
+
+                PointF[] pts = down
+                    ? new PointF[] {
+                        new PointF(x, cy - h / 2f),
+                        new PointF(x + h, cy + h / 2f),
+                        new PointF(x + size, cy - h / 2f) }
+                    : new PointF[] {
+                        new PointF(x + h / 2f, cy - h),
+                        new PointF(x + h / 2f + h, cy),
+                        new PointF(x + h / 2f, cy + h) };
+                g.DrawLines(p, pts);
+            }
+        }
+
         public static void FocusRing(Graphics g, Rectangle bounds, int radius)
         {
             Rectangle r = new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 3, bounds.Height - 3);

@@ -174,12 +174,16 @@ namespace PowerDial
         /// whole point of hoisting it out here is that one enumeration answers for every
         /// process instead of each process paying for its own.
         /// </summary>
-        static HashSet<int> PidsWithAWindow()
+        HashSet<int> PidsWithAWindow()
         {
             HashSet<int> pids = new HashSet<int>();
             try
             {
-                EnumWindows(delegate (IntPtr hWnd, IntPtr lp)
+                // The enumeration can be cut short - a window closing underneath it is
+                // enough. Whatever was collected before that is still correct, and a
+                // process wrongly counted as background for one sample rights itself on
+                // the next, so this is reported rather than retried.
+                bool complete = EnumWindows(delegate (IntPtr hWnd, IntPtr lp)
                 {
                     // Same test MainWindowHandle applies: a visible top-level window with
                     // no owner. Tool windows and hidden message sinks do not count as a
@@ -187,11 +191,17 @@ namespace PowerDial
                     if (!IsWindowVisible(hWnd)) return true;
                     if (GetWindow(hWnd, GW_OWNER) != IntPtr.Zero) return true;
 
+                    // The thread id is the success flag: zero means the window was
+                    // destroyed between being handed to us and being asked about, which
+                    // happens routinely mid-enumeration and leaves pid untouched.
                     int pid;
-                    GetWindowThreadProcessId(hWnd, out pid);
-                    if (pid != 0) pids.Add(pid);
+                    if (GetWindowThreadProcessId(hWnd, out pid) != 0 && pid != 0) pids.Add(pid);
                     return true;
                 }, IntPtr.Zero);
+
+                if (!complete)
+                    LastError = "the window scan was interrupted - one sample of which " +
+                                "apps have a window open may be incomplete";
             }
             catch (Exception) { }
             return pids;

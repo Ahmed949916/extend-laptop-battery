@@ -181,7 +181,7 @@ namespace PowerDial
         {
             SYSTEM_BATTERY_STATE st;
             if (CallNtPowerInformation(SystemBatteryState, IntPtr.Zero, 0, out st,
-                                       Marshal.SizeOf(typeof(SYSTEM_BATTERY_STATE))) != 0)
+                                       Marshal.SizeOf<SYSTEM_BATTERY_STATE>()) != 0)
                 return false;
 
             // No battery is a real answer, not a failure - so it counts as handled. A

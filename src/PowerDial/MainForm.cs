@@ -60,6 +60,7 @@ namespace PowerDial
         Suggestion _adviceFix;      // what the Overview primary button acts on, if anything
 
         NavRail _nav;               // the sidebar - the app's one navigation model
+        PillButton _background;     // sidebar footer action: put the window away
         StatusBlock _status;        // battery summary pinned to the foot of the sidebar
         string _page = "overview";  // which section is on screen
 
@@ -190,18 +191,41 @@ namespace PowerDial
 
             _poll.Interval = 15000;
             _poll.Tick += (s, e) => {
-                _bat.Poll();
-                _procs = _procWatch.Sample();
-                TrackWindowCpu();
-                PushSample();
-                RefreshReadout();
-                RefreshProcesses();
+                // Hidden in the tray is where this app spends most of its life, and it
+                // used to do exactly the same work there as on screen: enumerate every
+                // process, sort them, rebuild label text and refresh cards nobody can
+                // see. Painting already stopped on its own - Invalidate on an invisible
+                // control does nothing - but painting was never the expensive part.
+                bool onScreen = Visible && WindowState != FormWindowState.Minimized;
 
-                // Overview carries the live watts figure, and it used to be refreshed
-                // only from MaybeRecord - which runs once a minute. So three of every
-                // four battery readings were taken, computed and thrown away, and
-                // "Using now" could sit up to a minute behind the machine.
-                RefreshOverview();
+                // The battery read stays on its 15-second cadence either way. It is one
+                // kernel call now, and the watts figure is timed over a 60-second window
+                // of these samples, so thinning them out would cost the measurement.
+                _bat.Poll();
+                PushSample();
+
+                // The process sample is the expensive one. Hidden, the only thing that
+                // needs it is the minute record and its cumulative tally - so it is
+                // taken when that is due, and skipped the other three times.
+                bool recordDue = DueToRecord();
+                if (onScreen || recordDue)
+                {
+                    _procs = _procWatch.Sample();
+                    TrackWindowCpu();
+                }
+
+                if (onScreen)
+                {
+                    RefreshReadout();
+                    RefreshProcesses();
+
+                    // Overview carries the live watts figure, and it used to be refreshed
+                    // only from MaybeRecord - which runs once a minute. So three of every
+                    // four battery readings were taken, computed and thrown away, and
+                    // "Using now" could sit up to a minute behind the machine.
+                    RefreshOverview();
+                }
+
                 MaybeRecord();
 
                 // CPU is a delta, so the sample taken during startup carried memory
@@ -209,7 +233,7 @@ namespace PowerDial
                 // was looking at zeroes. Rescan once here, where the first real numbers
                 // land, then leave it alone: re-reading every setting on a fifteen-second
                 // timer is not free.
-                if (!_fixesSeeded) { _fixesSeeded = true; RefreshFixes(); }
+                if (onScreen && !_fixesSeeded) { _fixesSeeded = true; RefreshFixes(); }
             };
             _poll.Start();
 
@@ -217,6 +241,9 @@ namespace PowerDial
             // that moves is the difference between "working" and "hung"
             _tick.Interval = 1000;
             _tick.Tick += (s, e) => {
+                // Sixty wakeups a minute to move a countdown on a window that is not
+                // there. Hiding stops it; ShowFromTray starts it again.
+                if (!Visible || WindowState == FormWindowState.Minimized) return;
                 if (_readout == null || _bat.Watts.HasValue) return;
                 if (_windowStart == DateTime.MinValue) return;
                 int left = Math.Max(0, _bat.WindowSeconds - (int)(DateTime.UtcNow - _windowStart).TotalSeconds);
@@ -1228,6 +1255,19 @@ namespace PowerDial
             _nav.Add("health",      "Battery health");
             _nav.Add("diagnostics", "Diagnostics");
             _nav.SelectionChanged += (s, e) => SetPage(_nav.Selected);
+
+            // An action, not a page - so it sits under the entries with a gap, in body
+            // weight rather than as a nav item, and never takes the current-page marker.
+            // Closing the window already does this; saying so where people can see it
+            // beats a balloon shown once on the first close.
+            _background = new PillButton {
+                Text = "Run in background",
+                Location = new Point(12, 16 + 6 * 42 + 14),
+                Size = new Size(Rail - 24, 34),
+                BackColor = Theme.Sidebar
+            };
+            _background.Click += (s, e) => HideToTray();
+            _nav.Controls.Add(_background);
 
             _status = new StatusBlock {
                 Width = Rail,
@@ -2569,12 +2609,52 @@ namespace PowerDial
         /// Bring the window back, from the tray or from a second launch of the shortcut.
         /// Restore before Activate: activating a minimised window leaves it minimised.
         /// </summary>
+        /// <summary>
+        /// Back from the tray. Everything the poll skipped while hidden is stale by up
+        /// to a minute, so it is all brought up to date in one pass here rather than
+        /// leaving the window showing last-seen figures until the next tick.
+        /// </summary>
+        void WakeUi()
+        {
+            _procs = _procWatch.Sample();
+            TrackWindowCpu();
+            RefreshReadout();
+            RefreshProcesses();
+            RefreshOverview();
+            RefreshBasic();
+            if (_page == "modes") RefreshModes();
+            if (!_fixesSeeded) { _fixesSeeded = true; RefreshFixes(); }
+        }
+
         void ShowFromTray()
         {
             Show();
             if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
             BringToFront();
             Activate();
+            WakeUi();
+        }
+
+        /// <summary>
+        /// Put the window away without quitting - the same thing closing it does, but
+        /// said out loud. Everything goes on recording; it simply stops drawing, and
+        /// stops the work it was only doing in order to draw.
+        /// </summary>
+        void HideToTray()
+        {
+            Hide();
+            if (!_saidWhereItWent && _tray != null)
+            {
+                _saidWhereItWent = true;
+                try
+                {
+                    _tray.ShowBalloonTip(4000, "PowerDial is still running",
+                        "It keeps recording here in the notification area. Open it again from the " +
+                        "shortcut or this icon, and use Quit PowerDial to close it for good.",
+                        ToolTipIcon.Info);
+                }
+                catch (Exception) { }
+            }
         }
 
         /// <summary>
@@ -2637,23 +2717,10 @@ namespace PowerDial
         {
             if (e.CloseReason == CloseReason.UserClosing && !_quitting)
             {
+                // Closing and the sidebar's Run in background do the same thing, through
+                // the same method, so the balloon and the bookkeeping cannot drift apart.
                 e.Cancel = true;
-                Hide();
-
-                // Say where it went, once. Otherwise closing the window looks like quitting,
-                // and the app is left running with no obvious way back to it.
-                if (!_saidWhereItWent && _tray != null)
-                {
-                    _saidWhereItWent = true;
-                    try
-                    {
-                        _tray.ShowBalloonTip(4000, "PowerDial is still running",
-                            "It keeps recording here in the notification area. Open it again from the " +
-                            "shortcut or this icon, and use Quit PowerDial to close it for good.",
-                            ToolTipIcon.Info);
-                    }
-                    catch (Exception) { }
-                }
+                HideToTray();
                 return;
             }
             _quitting = true;
@@ -2867,6 +2934,20 @@ namespace PowerDial
         }
 
         /// <summary>Write one history point a minute. Anything faster is noise and disk churn.</summary>
+        /// <summary>
+        /// Is the minute record due on this tick?
+        ///
+        /// Asked before the process sample so that, while hidden, the sample is taken
+        /// only on the tick that is about to need it. MaybeRecord applies the same test
+        /// again - it is a comparison against a timestamp, not work worth caching, and
+        /// having one definition of "a minute has passed" is worth more than saving it.
+        /// </summary>
+        bool DueToRecord()
+        {
+            return _lastHistory == DateTime.MinValue ||
+                   (DateTime.UtcNow - _lastHistory).TotalSeconds >= 60;
+        }
+
         void MaybeRecord()
         {
             DateTime now = DateTime.UtcNow;

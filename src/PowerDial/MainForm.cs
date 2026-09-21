@@ -78,6 +78,8 @@ namespace PowerDial
         Panel _basicBox;
         SectionToggle _basicToggle, _logToggle;
         Panel _logBox, _logButtons;
+        Panel _procControls;        // the sort / filter row above the process table
+        int _procDividerX = -1;     // where the rule between the two groups goes
         TextBox _log;
         Panel _watchList, _watchButtons, _watchBox;
         SectionToggle _watchToggle;
@@ -367,7 +369,9 @@ namespace PowerDial
             _chrome.Controls.Add(_readout);
 
             // ---------------------------------------------------------- suggestions
-            Panel fixHead = Heading("Make it last longer", "what is worth changing on this PC right now",
+            // Green on the headings that divide the page, not on the cards under them -
+            // a colour every title shares stops marking anything.
+            Panel fixHead = Accent(Heading("Make it last longer", "what is worth changing on this PC right now",
                 "Everything below is something this app found wrong with how this PC is set up at " +
                 "the moment, sorted by what matters most. It is not a checklist of things you " +
                 "could do - a setting that is already sensible does not appear here at all, so an " +
@@ -381,7 +385,7 @@ namespace PowerDial
                 "shown; where it has not, the order of the list carries the priority instead.\n\n" +
                 "A few things cannot be fixed by writing a setting - background apps and whatever is " +
                 "holding a discrete GPU awake. Those open the Windows page where you do it yourself " +
-                "rather than pretending to be fixed.");
+                "rather than pretending to be fixed."));
             _root.Controls.Add(fixHead);
 
             _fixCard = new Card { Width = W, Height = 120, Margin = new Padding(0, 0, 0, 12) };
@@ -403,19 +407,27 @@ namespace PowerDial
                 Location = new Point(14, 58), Size = new Size(W - 30, 38), BackColor = Theme.Panel,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
+            // Right-aligned, to match the button on every suggestion above them and the
+            // pair on the Overview card. Placed in LayOutFixButtons, which also runs on
+            // resize - the label on Apply changes with the number of findings, so its
+            // width is not a constant either.
             _fixApplyAll = new PillButton {
-                Text = "Apply every fix", Glyph = Theme.GlyphCheck, Location = new Point(0, 3),
-                Size = new Size(176, 36), Primary = true, BackColor = Theme.Panel
+                Text = "Apply every fix", Glyph = Theme.GlyphCheck,
+                Size = new Size(176, 36), Primary = true, BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             _fixApplyAll.Click += (s, e) => ApplyAllFixes();
             _fixButtons.Controls.Add(_fixApplyAll);
             _fixRecheck = new PillButton {
-                Text = "Check again", Glyph = Theme.GlyphRefresh, Location = new Point(186, 3),
-                Size = new Size(140, 36), BackColor = Theme.Panel
+                Text = "Check again", Glyph = Theme.GlyphRefresh,
+                Size = new Size(140, 36), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             _fixRecheck.Click += (s, e) => RunBusy(_fixRecheck, delegate {
                 LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); });
             _fixButtons.Controls.Add(_fixRecheck);
+            _fixButtons.SizeChanged += (s, e) => LayOutFixButtons();
+            LayOutFixButtons();
             _fixCard.Controls.Add(_fixButtons);
 
             _root.Controls.Add(_fixCard);
@@ -445,7 +457,7 @@ namespace PowerDial
 
 
             // ---------------------------------------------------------- impact knobs
-            _root.Controls.Add(Heading("What changes your watts", "the settings worth tuning",
+            _root.Controls.Add(Accent(Heading("What changes your watts", "the settings worth tuning",
                 "The settings that change how much power this PC draws while you are using it. " +
                 "Everything here is applied to the battery side only, and anything Windows does " +
                 "not define on this hardware is left out rather than shown dead.\n\n" +
@@ -455,7 +467,7 @@ namespace PowerDial
                 "Timeouts and lid behaviour live under Basic settings instead, because they change " +
                 "nothing while you are actually at the keyboard.\n\n" +
                 "The switch chooses which side you are editing. Battery is the default and the only " +
-                "side the profiles, the suggestions and the restore point ever write."));
+                "side the profiles, the suggestions and the restore point ever write.")));
 
             _root.Controls.Add(BuildSideSwitch());
 
@@ -464,7 +476,7 @@ namespace PowerDial
 
             // ---------------------------------------------------------- basic knobs
             _basicToggle = new SectionToggle {
-                Width = W, Caption = "Basic settings",
+                Width = W, Caption = "Basic settings", CaptionColour = Theme.Save,
                 Sub = "timeouts and lid behaviour, none of which change your draw while you work",
                 Margin = new Padding(0, 10, 0, 0)
             };
@@ -553,33 +565,57 @@ namespace PowerDial
 
             Card pc = new Card { Width = W, Height = 292, Margin = new Padding(0, 0, 0, 10) };
             _procLabel = new Label {
-                Text = "Apps using the most power", Location = new Point(14, 10), Size = new Size(300, 18),
-                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel };
+                Text = "Apps using the most power", Location = new Point(14, 10), Size = new Size(300, 20),
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel,
+                // The controls share this line. When the window is too narrow for both,
+                // the heading gives way rather than the buttons wrapping or landing on
+                // top of it - LayOutProcControls sets the width it is allowed.
+                AutoEllipsis = true };
             pc.Controls.Add(_procLabel);
-            _btnMem = new PillButton { Text = "By memory", Location = new Point(W - 400, 6), Size = new Size(98, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _btnCpu = new PillButton { Text = "By CPU", Location = new Point(W - 296, 6), Size = new Size(80, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _btnBg = new PillButton { Text = "Background", Location = new Point(W - 210, 6), Size = new Size(118, 26), Selected = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            PillButton resetLive = new PillButton {
-                Text = "Reset", Glyph = Theme.GlyphRefresh, Location = new Point(W - 86, 6),
-                Size = new Size(72, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            // Two groups, not four loose buttons. "By memory" and "By CPU" answer one
+            // question and only one of them can be true, so they are joined into a single
+            // segmented control; "Background" and "Reset" do unrelated things and sit
+            // behind a divider so they cannot be read as more sort options.
+            _btnMem = new PillButton { Text = "By memory", Selected = true, Segment = Seg.Left };
+            _btnCpu = new PillButton { Text = "By CPU", Segment = Seg.Right };
+            _btnBg = new PillButton { Text = "Background", Selected = true };
+            PillButton resetLive = new PillButton { Text = "Reset", Glyph = Theme.GlyphRefresh };
+
             _btnMem.Click += (s, e) => { _sortCpu = false; RefreshProcesses(); };
             _btnCpu.Click += (s, e) => { _sortCpu = true; RefreshProcesses(); };
             _btnBg.Click += (s, e) => { _bgOnly = !_bgOnly; RefreshProcesses(); };
-            // CPU here is a delta against the previous sample, so "reset" means forget that
-            // baseline: the next poll reads zero and everything after it is fresh.
+
+            // Back to how this panel starts: the default sort, the default filter, and a
+            // cleared measurement baseline. CPU here is a delta against the previous
+            // sample, so clearing it means the next poll reads zero and everything after
+            // it is fresh - which is the only way to get an honest reading after the
+            // machine has been busy.
             resetLive.Click += (s, e) => {
+                _sortCpu = false;
+                _bgOnly = true;
                 _procWatch.ResetBaseline();
                 _window.Clear();
                 _lastPoll = DateTime.MinValue;
                 _procs = _procWatch.Sample();
                 RefreshProcesses();
                 RefreshContributors();
-                Log("Reset the live CPU baseline. The next reading starts from zero.");
+                Log("Reset the app list: sorted by memory, background only, and counting " +
+                    "from zero again.");
             };
-            pc.Controls.Add(_btnMem);
-            pc.Controls.Add(_btnCpu);
-            pc.Controls.Add(_btnBg);
-            pc.Controls.Add(resetLive);
+
+            _procControls = new Panel {
+                // 30, not 34: the table starts at y=40 and the two were two pixels apart.
+                Location = new Point(14, 4), Size = new Size(W - 30, 30), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _procControls.Paint += (s, e) => PaintProcControlDivider(e.Graphics);
+            _procControls.Controls.Add(_btnMem);
+            _procControls.Controls.Add(_btnCpu);
+            _procControls.Controls.Add(_btnBg);
+            _procControls.Controls.Add(resetLive);
+            pc.Controls.Add(_procControls);
+            _procControls.SizeChanged += (s, e) => LayOutProcControls();
+            LayOutProcControls();
             _procTable = new ProcessTable {
                 Location = new Point(14, 40), Size = new Size(W - 30, ProcessTable.RowH * 9 + 22), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             pc.Controls.Add(_procTable);
@@ -1206,6 +1242,11 @@ namespace PowerDial
             _cardVsOriginal.SeeAll.Click += (s, e) => SetPage("modes");
 
             _cardAdvice.Act.Click += (s, e) => OverviewAct();
+
+            // Advanced opens on "Make it last longer" - the same findings this card
+            // counts, one card each, with what is wrong and a button that fixes just
+            // that one. No scroll needed: it is the first thing on the page.
+            _cardAdvice.Detail.Click += (s, e) => SetPage("advanced");
             _cardAdvice.Recheck.Click += (s, e) => RunBusy(_cardAdvice.Recheck, delegate {
                 LoadValues(); RefreshWatch(); RefreshFixes(); });
             _cardMode.Change.Click += (s, e) => SetPage("modes");
@@ -1443,7 +1484,8 @@ namespace PowerDial
                 _cardAdvice.Title = fixable + (fixable == 1
                     ? " setting is costing you battery life" : " settings are costing you battery life");
                 _cardAdvice.Body = "One click changes them all, on the battery side only. Your " +
-                                   "plugged-in settings are not touched, and Undo puts everything back.";
+                                   "plugged-in settings are not touched, and Original settings on " +
+                                   "Power modes puts everything back.";
                 _cardAdvice.Note = "";
                 _cardAdvice.AllSet = false;
                 _cardAdvice.Act.Text = "Optimise my battery";
@@ -1550,6 +1592,76 @@ namespace PowerDial
                 px += bw + 8;
             }
             return outp;
+        }
+
+        /// <summary>
+        /// Lay the process-list controls out from the right edge inwards: the sorting
+        /// segment, a gap and a rule, then the filter and the reset.
+        ///
+        /// Right to left, and measured, so the row cannot collide with the heading it
+        /// shares a line with as the window narrows - which is exactly what the previous
+        /// hard-coded offsets from W did. When there is genuinely not enough room the
+        /// group slides left until it reaches the heading and stops, rather than wrapping.
+        /// </summary>
+        void LayOutProcControls()
+        {
+            if (_procControls == null || _btnMem == null) return;
+
+            const int H = 28;
+            const int Pad = 26;          // either side of a label
+            const int Join = 0;          // the segmented pair touch
+            const int Gap = 8;
+            const int GroupGap = 20;     // the rule lives in the middle of this
+
+            int top = (_procControls.Height - H) / 2;
+
+            PillButton reset = null;
+            foreach (Control c in _procControls.Controls)
+            {
+                PillButton b = c as PillButton;
+                if (b != null && b != _btnMem && b != _btnCpu && b != _btnBg) reset = b;
+            }
+            if (reset == null) return;
+
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                int wMem = (int)Math.Ceiling(Theme.TextW(g, _btnMem.Text, Theme.Title)) + Pad;
+                int wCpu = (int)Math.Ceiling(Theme.TextW(g, _btnCpu.Text, Theme.Title)) + Pad;
+                int wBg = (int)Math.Ceiling(Theme.TextW(g, _btnBg.Text, Theme.Title)) + Pad;
+                int wRst = (int)Math.Ceiling(Theme.TextW(g, reset.Text, Theme.Title)) + Pad + 18;
+
+                int x = _procControls.Width;
+
+                reset.SetBounds(x - wRst, top, wRst, H);
+                x -= wRst + Gap;
+
+                _btnBg.SetBounds(x - wBg, top, wBg, H);
+                x -= wBg + GroupGap;
+
+                _procDividerX = x + GroupGap / 2;
+
+                _btnCpu.SetBounds(x - wCpu, top, wCpu, H);
+                x -= wCpu + Join;
+
+                _btnMem.SetBounds(x - wMem, top, wMem, H);
+
+                // Whatever is left over is the heading's, never less than a stub. This is
+                // what keeps the two off each other at the window's minimum width.
+                if (_procLabel != null)
+                    _procLabel.Width = Math.Max(60, (14 + (x - wMem)) - 14 - 12);
+            }
+            _procControls.Invalidate();
+        }
+
+        /// <summary>The rule between the sorting group and the filter group.</summary>
+        void PaintProcControlDivider(Graphics g)
+        {
+            if (_procDividerX < 4) return;
+            Theme.Quality(g);
+            using (Pen p = new Pen(Theme.Edge, 1f))
+                g.DrawLine(p, _procDividerX, 6, _procDividerX, _procControls.Height - 6);
         }
 
         /// <summary>
@@ -1936,7 +2048,8 @@ namespace PowerDial
 
             if (MessageBox.Show(
                     "Change " + doable.Count + " setting(s) so this laptop lasts longer on battery?\n\n" +
-                    "Your plugged-in settings are not touched, and Undo puts everything back.",
+                    "Your plugged-in settings are not touched, and Original settings on Power " +
+                    "modes puts everything back.",
                     "Optimise my battery", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
 
@@ -3108,10 +3221,9 @@ namespace PowerDial
             _fixApplyAll.Visible = applicable > 1;
             _fixApplyAll.Text = applicable == 2 ? "Apply both" : "Apply all " + applicable;
 
-            // Check again sits after Apply all, or takes its place when there is nothing to
-            // apply. Left at a fixed offset it floated in from the edge with a gap beside
-            // it, which read as a mistake every time the list came back empty.
-            _fixRecheck.Left = _fixApplyAll.Visible ? _fixApplyAll.Right + 8 : 0;
+            // Apply's label just changed and it may have just appeared or gone, so the
+            // row is measured and placed again rather than nudged.
+            LayOutFixButtons();
 
             if (_fixes.Count == 0)
             {
@@ -3132,6 +3244,43 @@ namespace PowerDial
 
             _fixCard.Height = _fixButtons.Bottom + 12;
             _root.PerformLayout();
+        }
+
+        /// <summary>
+        /// Apply and Check again, sized to their labels and placed at the right margin.
+        ///
+        /// Apply's label counts the findings ("Apply both", "Apply every fix"), so it is
+        /// not a fixed width; and this runs on resize as well as on build, because the
+        /// card grows with the window and anchors alone would not re-measure the text.
+        /// </summary>
+        void LayOutFixButtons()
+        {
+            if (_fixButtons == null || _fixApplyAll == null || _fixRecheck == null) return;
+
+            const int Pad = 34;
+            const int Gap = 10;
+            const int H = 36;
+
+            int top = (_fixButtons.Height - H) / 2;
+            int x = _fixButtons.Width;
+
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                int wR = (int)Math.Ceiling(Theme.TextW(g, _fixRecheck.Text, Theme.Title)) + Pad + 18;
+                int wA = (int)Math.Ceiling(Theme.TextW(g, _fixApplyAll.Text, Theme.Title)) + Pad + 18;
+
+                _fixRecheck.SetBounds(x - wR, top, wR, H);
+
+                // When there is nothing to apply, Check again takes the margin on its
+                // own rather than leaving the hole where Apply used to be.
+                if (_fixApplyAll.Visible)
+                {
+                    x -= wR + Gap;
+                    _fixApplyAll.SetBounds(x - wA, top, wA, H);
+                }
+            }
         }
 
         /// <summary>One suggestion, as a card inside the suggestions panel.</summary>
@@ -3164,16 +3313,22 @@ namespace PowerDial
             };
             c.Controls.Add(detail);
 
+            // The button on the right, against the margin, and the before/after it will
+            // produce on the left of it. Reading order now runs statement, consequence,
+            // then the control that causes it - rather than offering the button first and
+            // putting what it would do at the far end of the row.
+            int actW = ButtonWidth(s.ActionLabel);
             PillButton act = new PillButton {
-                Text = s.ActionLabel, Location = new Point(12, 62), Size = new Size(ButtonWidth(s.ActionLabel), 30),
-                Primary = s.CanApply, BackColor = Theme.Inset
+                Text = s.ActionLabel, Location = new Point(w - 14 - actW, 62), Size = new Size(actW, 30),
+                Primary = s.CanApply, BackColor = Theme.Inset,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             PillButton actLocal = act;
             act.Click += (o, e) => ApplyFix(local, actLocal);
             c.Controls.Add(act);
 
             // the saving, and the before/after, painted rather than laid out so they can
-            // sit hard against the right edge whatever length they are
+            // sit hard against whatever is beside them whatever length they are
             c.Paint += (o, e) => {
                 Graphics g = e.Graphics;
                 Theme.Quality(g);
@@ -3181,7 +3336,7 @@ namespace PowerDial
                     Theme.StrRight(g, "~" + local.Gain.Value.ToString("0.0") + " W", Theme.Value, Theme.Save, c.Width - 34, 6);
                 string change = local.Change;
                 if (change.Length > 0)
-                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, c.Width - 14, 70);
+                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, actLocal.Left - 14, 70);
             };
 
             return c;

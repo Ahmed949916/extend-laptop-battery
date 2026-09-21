@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -190,11 +190,72 @@ namespace PowerDial
         public string MemFormat = "0";
         public const int RowH = 21;
 
+        /// <summary>Where the rows start, under the header and its rule.</summary>
+        const int FirstRowY = 21;
+
+        int _hot = -1;
+        readonly ToolTip _tip = new ToolTip();
+        string _tipFor = "";
+
         public ProcessTable()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Panel;
+
+            // Its own top-level window, so a long name is never clipped by the card it is
+            // reported in or by the edge of the app.
+            _tip.InitialDelay = 350;
+            _tip.ReshowDelay = 120;
+            _tip.ShowAlways = true;
+        }
+
+        /// <summary>The row at a point, or -1. One definition, shared with the paint.</summary>
+        int RowAt(int y)
+        {
+            if (Rows.Count == 0) return -1;
+            int i = (y - FirstRowY) / RowH;
+            return (i >= 0 && i < Rows.Count) ? i : -1;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int row = RowAt(e.Y);
+            if (row == _hot) { base.OnMouseMove(e); return; }
+            _hot = row;
+
+            string full = "";
+            if (row >= 0)
+            {
+                ProcInfo r = Rows[row];
+                full = r.Name;
+                if (r.Instances > 1) full += "  x" + r.Instances;
+                if (r.Self) full += "  (this app)";
+                if (r.Background) full += "  - no window open";
+            }
+
+            if (full != _tipFor)
+            {
+                _tipFor = full;
+                if (full.Length > 0) _tip.Show(full, this, 8, FirstRowY + row * RowH + RowH + 2, 4000);
+                else _tip.Hide(this);
+            }
+
+            Invalidate();
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_hot != -1) { _hot = -1; Invalidate(); }
+            if (_tipFor.Length > 0) { _tipFor = ""; _tip.Hide(this); }
+            base.OnMouseLeave(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _tip.Dispose();
+            base.Dispose(disposing);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -223,7 +284,8 @@ namespace PowerDial
                 if (v > max) max = v;
             }
 
-            int y = 21;
+            int y = FirstRowY;
+            int row = 0;
             foreach (ProcInfo r in Rows)
             {
                 double v = SortByCpu ? r.CpuPercent : r.WorkingSetMb;
@@ -240,13 +302,21 @@ namespace PowerDial
                 string label = r.Name;
                 if (r.Instances > 1) label += "  x" + r.Instances;
                 if (r.Self) label += "  (this app)";
-                Theme.Str(g, label, Theme.Small, r.Background ? Theme.Text : Theme.Dim, nameX + 4, y + 1);
+
+                // Cut to the column rather than allowed to run under the figures. The
+                // name identifies the process, so the tail is what goes; the whole thing
+                // is a hover away.
+                label = Theme.Fit(g, label, Theme.Small, cpuR - (nameX + 4) - 14);
+
+                Color nameColour = row == _hot ? Theme.Lead : (r.Background ? Theme.Text : Theme.Dim);
+                Theme.Str(g, label, Theme.Small, nameColour, nameX + 4, y + 1);
 
                 Theme.StrRight(g, r.CpuPercent.ToString(CpuFormat) + CpuSuffix, Theme.Small,
                                SortByCpu ? accent : Theme.Dim, cpuR, y + 1);
                 Theme.StrRight(g, r.WorkingSetMb.ToString(MemFormat) + MemSuffix, Theme.Small,
                                SortByCpu ? Theme.Dim : accent, memR, y + 1);
                 y += RowH;
+                row++;
             }
         }
     }

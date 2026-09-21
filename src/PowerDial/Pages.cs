@@ -261,7 +261,7 @@ namespace PowerDial
 
             if (!HasBattery)
             {
-                Theme.Str(g, "Mains power", Theme.Head, Theme.Text, 24, 22);
+                Theme.Str(g, "Mains power", Theme.Head, Theme.Save, 24, 22);
                 Theme.Str(g, "This PC has no battery, so there is no runtime to extend. " +
                              "The power settings and the process list still apply.",
                           Theme.Body, Theme.Dim, 24, 52);
@@ -441,6 +441,17 @@ namespace PowerDial
         public bool Warn = true;
 
         public readonly PillButton Act = new PillButton();
+
+        /// <summary>
+        /// Through to the full list on Advanced.
+        ///
+        /// The card names a count and offers to fix it in one press, which is the right
+        /// default and the wrong amount of information for anyone who wants to know what
+        /// is actually about to change. Advanced lists each one with what it costs and a
+        /// button of its own, so this is the way to look before leaping.
+        /// </summary>
+        public readonly PillButton Detail = new PillButton();
+
         public readonly PillButton Recheck = new PillButton();
 
         public AdviceCard()
@@ -448,15 +459,27 @@ namespace PowerDial
             Height = 190;
             AccessibleRole = AccessibleRole.Grouping;
 
+            // Anchored right, not merely placed there. Reflow runs when the content
+            // changes, which is not when the window is resized - so without this the pair
+            // kept whatever x it was last given and drifted away from the edge as the
+            // card grew, which looked like the buttons wandering.
             Act.Primary = true;
             Act.BackColor = Theme.Panel;
             Act.Size = new Size(250, 38);
+            Act.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             Controls.Add(Act);
+
+            Detail.Text = "Show me the detail";
+            Detail.BackColor = Theme.Panel;
+            Detail.Size = new Size(176, 38);
+            Detail.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(Detail);
 
             Recheck.Text = "Check again";
             Recheck.Glyph = Theme.GlyphRefresh;
             Recheck.BackColor = Theme.Panel;
             Recheck.Size = new Size(150, 38);
+            Recheck.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             Controls.Add(Recheck);
         }
 
@@ -473,20 +496,56 @@ namespace PowerDial
             float bodyH = TextHeight(g, Body, Theme.Body, Width - 92);
             float noteH = Note.Length > 0 ? TextHeight(g, Note, Theme.Small, Width - 92) + 6 : 0;
             int y = (int)(58 + bodyH + noteH) + 10;
+            PlaceButtons(y);
+            Height = y + Act.Height + (AllSet ? 52 : 22);
+        }
 
-            // Right-aligned, and laid out from the right edge inwards so the pair keeps
-            // its shape whatever the card is doing: Check again sits at the margin, the
-            // primary button to its left, and when there is nothing to apply and Act is
-            // hidden, Check again simply takes the margin on its own. Anchoring to the
-            // left instead left a gap where the missing button used to be.
+        /// <summary>
+        /// The button pair, from the right edge inwards: Check again at the margin, the
+        /// primary action to its left, and when there is nothing to apply and Act is
+        /// hidden, Check again takes the margin on its own. Placing from the left instead
+        /// left a hole where the missing button used to be.
+        ///
+        /// Called from Reflow, which runs when the content changes, and again on every
+        /// resize - the anchors alone kept the gap but nothing recomputed it when Act
+        /// appeared or disappeared at a different width.
+        /// </summary>
+        void PlaceButtons(int y)
+        {
             const int Margin = 24;
             const int Gap = 10;
+            const int Pad = 34;          // breathing room either side of a label
+            const int H = 38;
 
-            int right = Math.Max(120, Width - Margin);
-            Recheck.Location = new Point(right - Recheck.Width, y);
-            Act.Location = new Point(right - Recheck.Width - Gap - Act.Width, y);
+            // Sized from their own labels, not from constants. Act's text is whatever the
+            // suggestion calls itself, so a fixed 250 was either too wide for "Optimise
+            // my battery" or too narrow for something longer.
+            int x = Math.Max(160, Width - Margin);
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                x = Place(g, Recheck, x, y, Pad, H);
+                x -= Gap;
+                x = Place(g, Detail, x, y, Pad, H);
+                if (Act.Visible) { x -= Gap; Place(g, Act, x, y, Pad, H); }
+            }
+        }
 
-            Height = y + Act.Height + (AllSet ? 52 : 22);
+        /// <summary>Size a button to its label and set its right edge at x. Returns the
+        /// new right edge, so the next one along can be placed against it.</summary>
+        static int Place(Graphics g, PillButton b, int x, int y, int pad, int h)
+        {
+            int w = (int)Math.Ceiling(Theme.TextW(g, b.Text, Theme.Title)) + pad;
+            if (!string.IsNullOrEmpty(b.Glyph)) w += 18;
+            b.SetBounds(x - w, y, w, h);
+            return x - w;
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            if (Act.Top > 0) PlaceButtons(Act.Top);
         }
 
         static float TextHeight(Graphics g, string s, Font f, int width)
@@ -554,9 +613,11 @@ namespace PowerDial
 
         public ModeSummaryCard()
         {
-            // 206 left four pixels between the Change button and the box under it, which
-            // read as the button resting on the box rather than sitting above it.
-            Height = 228;
+            // The footer line came out, so the card no longer needs the height that was
+            // holding it - 212 closes the gap without crowding the measured figure. It
+            // matches TopAppsCard beside it: two cards in a row at different heights read
+            // as one of them having failed to finish.
+            Height = 212;
             AccessibleRole = AccessibleRole.Grouping;
 
             Change.Text = "Change";
@@ -583,7 +644,7 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
 
-            Theme.Str(g, "Power mode", Theme.Section, Theme.Text, 20, 20);
+            Theme.Str(g, "Power mode", Theme.Section, Theme.Save, 20, 20);
 
             Rectangle box = new Rectangle(20, 70, Math.Max(80, Width - 40), 68);
             Theme.FillRound(g, box, 6, Known ? Color.FromArgb(30, Theme.Save) : Theme.Inset,
@@ -606,7 +667,7 @@ namespace PowerDial
             if (Watts.HasValue)
             {
                 Theme.Str(g, "Measured here", Theme.Small, Theme.Mute, 20, 152);
-                Theme.Str(g, Watts.Value.ToString("0.0") + " W", Theme.Stat, Theme.Text, 20, 170);
+                Theme.Str(g, Watts.Value.ToString("0.0") + " W", Theme.Stat, Theme.Lead, 20, 170);
                 Theme.Str(g, "over " + Minutes + " min on battery", Theme.Small, Theme.Mute, 78, 176);
             }
             else
@@ -615,7 +676,10 @@ namespace PowerDial
                 Theme.Str(g, "use this mode for five minutes on battery", Theme.Small, Theme.Mute, 20, 178);
             }
 
-            Theme.Str(g, "Read from Windows, not assumed.", Theme.Small, Theme.Mute, 20, Height - 26);
+            // "Read from Windows, not assumed." used to sit here. It was true of every
+            // figure on every card, which is the app's whole premise and stated in the
+            // page subtitles - repeating it under one card said nothing the others did
+            // not, and cost the card 30px to say it.
         }
     }
 
@@ -643,18 +707,132 @@ namespace PowerDial
 
         public readonly PillButton SeeAll = new PillButton();
 
+        const int NameW = 128;
+        const int FigW = 74;
+        const int FirstRowY = 80;
+        const int Pitch = 22;
+
+        /// <summary>
+        /// Which row the pointer or the keyboard is on, or -1. A painted card has no child
+        /// control per row, so the row under the cursor has to be worked out from the
+        /// geometry the paint uses - kept here so both agree.
+        /// </summary>
+        int _hot = -1;
+        int _focusRow = -1;
+
+        readonly ToolTip _tip = new ToolTip();
+        string _tipFor = "";
+
         public TopAppsCard()
         {
             // Four rows at 22px, then the footnote: 168 put the footnote on top of the
             // fourth row. The height tracks ModeSummaryCard beside it - two cards in a row
             // at different heights read as one of them having failed to finish.
-            Height = 228;
+            Height = 212;
             AccessibleRole = AccessibleRole.Grouping;
 
             SeeAll.Text = "See all";
             SeeAll.BackColor = Theme.Panel;
             SeeAll.Size = new Size(104, 34);
             Controls.Add(SeeAll);
+
+            // A tooltip is its own top-level window, so the full name is never clipped by
+            // the card or by the edge of the app the way an in-card overlay would be.
+            _tip.InitialDelay = 350;
+            _tip.ReshowDelay = 120;
+            _tip.ShowAlways = true;
+
+            // Reachable without a mouse: the names are the one thing on this card that
+            // can be cut off, so there has to be a way to read the rest of one.
+            TabStop = true;
+        }
+
+        /// <summary>The row at a point, or -1. The single definition of the row grid.</summary>
+        int RowAt(int y)
+        {
+            if (Rows.Count == 0) return -1;
+            int i = (y - FirstRowY + 4) / Pitch;
+            return (i >= 0 && i < Math.Min(4, Rows.Count)) ? i : -1;
+        }
+
+        void ShowTipFor(int row)
+        {
+            if (row < 0 || row >= Rows.Count) { HideTip(); return; }
+
+            string full = Rows[row].Name;
+            if (Rows[row].Background) full += "  (no window open)";
+            if (full == _tipFor) return;
+
+            _tipFor = full;
+            _tip.Show(full, this, 20 + NameW / 2, FirstRowY + row * Pitch + Pitch, 4000);
+        }
+
+        void HideTip()
+        {
+            if (_tipFor.Length == 0) return;
+            _tipFor = "";
+            _tip.Hide(this);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int row = RowAt(e.Y);
+            if (row != _hot)
+            {
+                _hot = row;
+                if (row >= 0) ShowTipFor(row); else HideTip();
+                Invalidate();
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_hot != -1) { _hot = -1; Invalidate(); }
+            HideTip();
+            base.OnMouseLeave(e);
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Up || keyData == Keys.Down || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            int last = Math.Min(4, Rows.Count) - 1;
+            if (last >= 0 && (e.KeyCode == Keys.Down || e.KeyCode == Keys.Up))
+            {
+                Theme.KeyboardNav = true;
+                _focusRow = e.KeyCode == Keys.Down
+                    ? Math.Min(last, _focusRow + 1)
+                    : Math.Max(0, _focusRow < 0 ? 0 : _focusRow - 1);
+                ShowTipFor(_focusRow);
+                Invalidate();
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnEnter(EventArgs e)
+        {
+            if (_focusRow < 0 && Rows.Count > 0) { _focusRow = 0; ShowTipFor(0); }
+            Invalidate();
+            base.OnEnter(e);
+        }
+
+        protected override void OnLeave(EventArgs e)
+        {
+            _focusRow = -1;
+            HideTip();
+            Invalidate();
+            base.OnLeave(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _tip.Dispose();
+            base.Dispose(disposing);
         }
 
         public void Describe()
@@ -678,7 +856,7 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
 
-            Theme.Str(g, "Apps using the most power", Theme.Section, Theme.Text, 20, 20);
+            Theme.Str(g, "Apps using the most power", Theme.Section, Theme.Save, 20, 20);
             Theme.Str(g, "Processor time used over the last " + Math.Max(1, WindowSeconds) +
                          " seconds. More time means more drain.",
                       Theme.Small, Theme.Mute, 20, 44);
@@ -693,18 +871,25 @@ namespace PowerDial
             foreach (Row r in Rows) if (r.Seconds > max) max = r.Seconds;
             if (max <= 0) max = 1;
 
-            const int NameW = 128;
-            const int FigW = 74;
             int barMax = Math.Max(30, Width - 40 - NameW - FigW - 16);
 
-            int y = 80;
+            int y = FirstRowY;
             for (int i = 0; i < Rows.Count && i < 4; i++)
             {
                 Row r = Rows[i];
-                Theme.Str(g, r.Name, Theme.Small, Theme.Text, 20, y);
+
+                // The name column is fixed so the bars and figures line up whatever is
+                // running - a long process name used to push nothing, it simply ran under
+                // the bar. Room is reserved for the BG marker on the rows that carry one.
+                float room = NameW - 10 - (r.Background ? 24 : 0);
+                string shown = Theme.Fit(g, r.Name, Theme.Small, room);
+
+                bool lit = i == _hot || (i == _focusRow && Focused);
+                Theme.Str(g, shown, Theme.Small, lit ? Theme.Lead : Theme.Text, 20, y);
+
                 if (r.Background)
                 {
-                    float nx = 20 + g.MeasureString(r.Name, Theme.Small).Width + 6;
+                    float nx = 20 + g.MeasureString(shown, Theme.Small).Width + 6;
                     if (nx < 20 + NameW - 24)
                         Theme.Str(g, "BG", Theme.Small, Theme.Mute, nx, y);
                 }
@@ -718,8 +903,12 @@ namespace PowerDial
 
                 Theme.StrRight(g, r.Seconds.ToString("0.0") + " s", Theme.Small, Theme.Dim,
                                Width - 20, y);
-                y += 22;
+                y += Pitch;
             }
+
+            if (_focusRow >= 0 && Focused && Theme.KeyboardNav)
+                Theme.FocusRing(g, new Rectangle(16, FirstRowY + _focusRow * Pitch - 3,
+                                                 Math.Max(40, Width - 32), Pitch), 4);
 
             Theme.Str(g, "BG marks an app with no window open.", Theme.Small, Theme.Mute, 20, Height - 26);
         }
@@ -1092,7 +1281,7 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
 
-            Theme.Str(g, "Compared with your original settings", Theme.Section, Theme.Text, 20, 20);
+            Theme.Str(g, "Compared with your original settings", Theme.Section, Theme.Save, 20, 20);
             Theme.Str(g, "How this laptop was set up before PowerDial, against the mode you are " +
                          "using now. Both measured here.",
                       Theme.Small, Theme.Mute, 20, 46);

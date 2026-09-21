@@ -166,6 +166,49 @@ namespace PowerDial
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         }
 
+        /// <summary>
+        /// The string, cut down with an ellipsis until it fits inside maxWidth.
+        ///
+        /// The beginning is what identifies a process, so the tail is what goes - and the
+        /// measurement is done against the font actually being drawn rather than a
+        /// character count, which is wrong the moment the text is not monospaced.
+        /// </summary>
+        public static string Fit(Graphics g, string s, Font f, float maxWidth)
+        {
+            if (string.IsNullOrEmpty(s) || maxWidth <= 0) return s;
+            if (g.MeasureString(s, f).Width <= maxWidth) return s;
+
+            const string Cut = "...";
+            float ell = g.MeasureString(Cut, f).Width;
+            if (ell >= maxWidth) return "";
+
+            // Longest prefix that still fits, found by halving rather than by walking one
+            // character at a time - these run inside paint handlers.
+            //
+            // Every probe is a span over the original string, never a Substring: this
+            // runs on every repaint of every row, and allocating a throwaway string per
+            // probe to measure text we are about to discard is the sort of garbage that
+            // only shows up as a stutter much later.
+            int lo = 0, hi = s.Length;
+            while (lo < hi)
+            {
+                int mid = (lo + hi + 1) / 2;
+                if (g.MeasureString(s.AsSpan(0, mid), f).Width + ell <= maxWidth) lo = mid;
+                else hi = mid - 1;
+            }
+            if (lo <= 0) return Cut;
+
+            ReadOnlySpan<char> kept = s.AsSpan(0, lo).TrimEnd();
+            return kept.Length == 0 ? Cut : new string(kept) + Cut;
+        }
+
+        /// <summary>True when Fit would have to shorten it - so a caller knows whether a
+        /// tooltip carrying the whole thing is worth offering.</summary>
+        public static bool Clipped(Graphics g, string s, Font f, float maxWidth)
+        {
+            return !string.IsNullOrEmpty(s) && maxWidth > 0 && g.MeasureString(s, f).Width > maxWidth;
+        }
+
         public static GraphicsPath Round(Rectangle r, int radius)
         {
             int d = radius * 2;
@@ -177,6 +220,52 @@ namespace PowerDial
             p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
             p.CloseFigure();
             return p;
+        }
+
+        /// <summary>
+        /// A rectangle rounded on only the ends you ask for, so buttons can be butted
+        /// together into one segmented control: round outside, square where they meet.
+        /// </summary>
+        public static GraphicsPath Round(Rectangle r, int radius, bool leftEnd, bool rightEnd)
+        {
+            if (radius <= 0) return Round(r, 0);
+            if (leftEnd && rightEnd) return Round(r, radius);
+
+            // GraphicsPath joins consecutive segments with an implicit line, so a square
+            // corner needs no segment of its own - only the edge that arrives at it. Adding
+            // a zero-length line for one is what produces the stray pixel at a join.
+            int d = radius * 2, l = r.X, t = r.Y, rr = r.Right, b = r.Bottom;
+            GraphicsPath p = new GraphicsPath();
+
+            if (leftEnd) p.AddArc(l, t, d, d, 180, 90);
+            else p.AddLine(l, b, l, t);
+
+            if (rightEnd) p.AddArc(rr - d, t, d, d, 270, 90);
+            else p.AddLine(rr, t, rr, b);
+
+            if (rightEnd) p.AddArc(rr - d, b - d, d, d, 0, 90);
+            if (leftEnd) p.AddArc(l, b - d, d, d, 90, 90);
+
+            p.CloseFigure();
+            return p;
+        }
+
+        /// <summary>Fill and outline, with only the chosen ends rounded.</summary>
+        public static void FillRound(Graphics g, Rectangle r, int radius, Color fill, Color border,
+                                     float width, bool leftEnd, bool rightEnd)
+        {
+            using (GraphicsPath p = Round(r, radius, leftEnd, rightEnd))
+            using (SolidBrush b = new SolidBrush(fill))
+                g.FillPath(b, p);
+
+            int inset = (int)Math.Round((width - 1f) / 2f, MidpointRounding.AwayFromZero);
+            Rectangle s2 = inset <= 0 ? r : new Rectangle(
+                r.X + inset, r.Y + inset,
+                Math.Max(1, r.Width - inset * 2), Math.Max(1, r.Height - inset * 2));
+
+            using (GraphicsPath p = Round(s2, Math.Max(1, radius - inset), leftEnd, rightEnd))
+            using (Pen pen = new Pen(border, width))
+                g.DrawPath(pen, p);
         }
 
         public static void FillRound(Graphics g, Rectangle r, int radius, Color fill)

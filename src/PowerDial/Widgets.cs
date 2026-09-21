@@ -108,10 +108,28 @@ namespace PowerDial
     }
 
     /// <summary>Flat button with hover and press states.</summary>
+    /// <summary>Where a button sits in a segmented group, if it is in one.</summary>
+    public enum Seg
+    {
+        /// <summary>On its own - rounded all round, the ordinary case.</summary>
+        Alone,
+        Left,
+        Middle,
+        Right
+    }
+
     public sealed class PillButton : Control
     {
         public bool Primary;
         public bool Selected;
+
+        /// <summary>
+        /// Butt this button up against its neighbours as one control: rounded on the
+        /// outside, square where they meet. Two mutually exclusive choices read as one
+        /// question with two answers when they are joined, and as two unrelated buttons
+        /// when they are not.
+        /// </summary>
+        public Seg Segment = Seg.Alone;
 
         /// <summary>
         /// Render as one tab in a strip rather than as a button: no chrome until it is
@@ -295,16 +313,26 @@ namespace PowerDial
             else if (Primary)  { fill = Theme.Save;  border = Theme.Save; fg = Theme.Ink;  }
             else               { fill = Theme.Inset; border = Theme.Line; fg = Theme.Text; }
 
+            // Unavailable, and looking it. Without this a disabled button is identical to
+            // a live one and only reveals itself by doing nothing when pressed.
+            if (!Enabled)
+            {
+                fill = Theme.Inset;
+                border = Theme.Edge;
+                fg = Theme.Mute;
+            }
+            else if (_down) fill = ControlPaint.Dark(fill, 0.06f);
+            else if (_hot) fill = ControlPaint.Light(fill, 0.10f);
             // Hover and press move the surface, never the accent: green says "this is the
             // one in use", and a hover that also went green would say that about whatever
             // the pointer happened to be passing over.
-            if (_down) fill = ControlPaint.Dark(fill, 0.06f);
-            else if (_hot) fill = ControlPaint.Light(fill, 0.10f);
 
             // Theme.ButtonEdge, not 1px: an outlined button on a dark ground needs a
             // border you can actually see to read as a control rather than as a panel in
             // a slightly different shade.
-            Theme.FillRound(g, r, 8, fill, border, Theme.ButtonEdge);
+            bool leftEnd = Segment == Seg.Alone || Segment == Seg.Left;
+            bool rightEnd = Segment == Seg.Alone || Segment == Seg.Right;
+            Theme.FillRound(g, r, 8, fill, border, Theme.ButtonEdge, leftEnd, rightEnd);
 
             // fg, not the accent: a Primary button is now filled with the accent, so an
             // accent-coloured arc on top of it would be an invisible spinner.
@@ -325,6 +353,13 @@ namespace PowerDial
             Theme.Str(g, Text, Theme.Title, fg, tx, ty);
 
             if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 8);
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+            Invalidate();
+            base.OnEnabledChanged(e);
         }
 
         /// <summary>One tab in the section strip. Quiet until it means something.</summary>
@@ -994,6 +1029,13 @@ namespace PowerDial
         public bool Expanded;
         public string Caption = "";
         public string Sub = "";
+
+        /// <summary>
+        /// The caption's colour. Green marks a heading that introduces a section of the
+        /// page, the way the other section headings are marked; the default leaves it as
+        /// body text, which is right for a collapsible tucked at the foot of a page.
+        /// </summary>
+        public Color CaptionColour = Theme.Text;
         bool _hot;
         public event EventHandler Toggled;
 
@@ -1088,7 +1130,7 @@ namespace PowerDial
             // lines cannot fail to draw.
             SizeF cap = g.MeasureString(Caption, Theme.Section);
             Theme.Chevron(g, 5, Height / 2f, 9f, Expanded, c);
-            Theme.Str(g, Caption, Theme.Section, Theme.Text, 24, (Height - cap.Height) / 2f);
+            Theme.Str(g, Caption, Theme.Section, CaptionColour, 24, (Height - cap.Height) / 2f);
             if (Sub.Length > 0)
             {
                 SizeF sub = g.MeasureString(Sub, Theme.Small);

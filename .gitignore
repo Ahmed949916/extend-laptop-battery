@@ -17,7 +17,7 @@ obj/
 /PowerDial.runtimeconfig.json
 /System.Management.dll
 /runtimes/
-
+/*.exe
 # Where scripts\publish.ps1 stages the published files before copying the one exe up.
 /.publish/
 

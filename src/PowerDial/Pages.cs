@@ -473,11 +473,19 @@ namespace PowerDial
             float bodyH = TextHeight(g, Body, Theme.Body, Width - 92);
             float noteH = Note.Length > 0 ? TextHeight(g, Note, Theme.Small, Width - 92) + 6 : 0;
             int y = (int)(58 + bodyH + noteH) + 10;
-            Act.Location = new Point(68, y);
 
-            // With nothing to apply, Act is hidden - and Check again was left sitting in
-            // the middle of the card, at the offset the missing button had reserved.
-            Recheck.Location = new Point(Act.Visible ? 68 + Act.Width + 10 : 68, y);
+            // Right-aligned, and laid out from the right edge inwards so the pair keeps
+            // its shape whatever the card is doing: Check again sits at the margin, the
+            // primary button to its left, and when there is nothing to apply and Act is
+            // hidden, Check again simply takes the margin on its own. Anchoring to the
+            // left instead left a gap where the missing button used to be.
+            const int Margin = 24;
+            const int Gap = 10;
+
+            int right = Math.Max(120, Width - Margin);
+            Recheck.Location = new Point(right - Recheck.Width, y);
+            Act.Location = new Point(right - Recheck.Width - Gap - Act.Width, y);
+
             Height = y + Act.Height + (AllSet ? 52 : 22);
         }
 

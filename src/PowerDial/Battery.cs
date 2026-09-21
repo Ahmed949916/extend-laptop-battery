@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Management;
 using System.Runtime.InteropServices;
@@ -35,11 +35,18 @@ namespace PowerDial
 
         readonly List<BatterySample> _samples = new List<BatterySample>();
 
-        // Constructing a ManagementObjectSearcher on every poll is what made this app
-        // cost ~4% of a CPU core - absurd for something whose job is saving power.
-        // Built once and reused, it is a rounding error.
-        ManagementObjectSearcher _statusQ;
+        // Only the full-charge capacity still comes from WMI, and only until it has been
+        // read once. Everything read on the poll now comes from CallNtPowerInformation -
+        // see ReadPower. Constructing a searcher per poll once cost this app ~4% of a
+        // core; reusing one was the first fix, not needing one at all is the real one.
         ManagementObjectSearcher _capacityQ;
+
+        /// <summary>
+        /// False once the syscall has answered. WMI is then never touched again on the
+        /// poll path - it is kept only as the fallback for firmware the syscall cannot
+        /// read, and for the full-charge capacity, which is read once and rarely moves.
+        /// </summary>
+        bool _useWmiForStatus;
 
         public int? RemainingMwh { get; private set; }
         public int? FullChargeMwh { get; private set; }
@@ -95,7 +102,6 @@ namespace PowerDial
         /// </summary>
         public void Dispose()
         {
-            if (_statusQ != null) { _statusQ.Dispose(); _statusQ = null; }
             if (_capacityQ != null) { _capacityQ.Dispose(); _capacityQ = null; }
             GC.SuppressFinalize(this);
         }
@@ -105,7 +111,13 @@ namespace PowerDial
             LastError = null;
             try
             {
-                ReadWmi();
+                // The syscall first, every time, and WMI only where it cannot answer.
+                // A WMI query marshals through COM into WmiPrvSE.exe, so it wakes a
+                // second process and both of them pay - four times a minute, forever,
+                // including while this window is hidden in the tray. The same three
+                // values come out of one kernel call that allocates nothing.
+                if (!_useWmiForStatus && ReadPower()) ReadCapacityOnce();
+                else { _useWmiForStatus = true; ReadWmi(); }
             }
             catch (Exception ex)
             {
@@ -152,6 +164,79 @@ namespace PowerDial
             Watts = null;
         }
 
+        /// <summary>
+        /// Charge, AC state and charging, from one kernel call.
+        ///
+        /// SYSTEM_BATTERY_STATE carries the same RemainingCapacity that BatteryStatus
+        /// does, in mWh, plus the two flags - with no COM, no second process and no
+        /// allocation. Returns false when there is nothing usable in it, which is the
+        /// signal to fall back to WMI permanently rather than retrying a syscall that
+        /// this firmware evidently does not fill in.
+        ///
+        /// Its Rate field is deliberately ignored. That is the same instantaneous figure
+        /// the ACPI DischargeRate exposes, and on this hardware it returns the invalid
+        /// sentinel - which is the whole reason draw is timed from the counter instead.
+        /// </summary>
+        bool ReadPower()
+        {
+            SYSTEM_BATTERY_STATE st;
+            if (CallNtPowerInformation(SystemBatteryState, IntPtr.Zero, 0, out st,
+                                       Marshal.SizeOf(typeof(SYSTEM_BATTERY_STATE))) != 0)
+                return false;
+
+            // No battery is a real answer, not a failure - so it counts as handled. A
+            // desktop that fell through to WMI here would have gone on asking WmiPrvSE
+            // for a battery it does not have, four times a minute, forever.
+            if (st.BatteryPresent == 0)
+            {
+                RemainingMwh = null;
+                OnAc = st.AcOnLine != 0;
+                Charging = false;
+                return true;
+            }
+
+            // Unknown capacity is the all-ones sentinel, and that IS a firmware the
+            // syscall cannot read - worth falling back for.
+            if (st.RemainingCapacity == 0xFFFFFFFF) return false;
+
+            RemainingMwh = unchecked((int)st.RemainingCapacity);
+            OnAc = st.AcOnLine != 0;
+            Charging = st.Charging != 0;
+
+            if (FullChargeMwh.HasValue && FullChargeMwh.Value > 0)
+                PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / FullChargeMwh.Value);
+            else if (st.MaxCapacity > 0 && st.MaxCapacity != 0xFFFFFFFF)
+                PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / st.MaxCapacity);
+
+            return true;
+        }
+
+        /// <summary>
+        /// The full-charge capacity, once. It is what health is measured against and what
+        /// the percentage divides by, and it moves by a few mWh over months - so there is
+        /// nothing to gain from asking WMI for it every fifteen seconds.
+        /// </summary>
+        void ReadCapacityOnce()
+        {
+            if (FullChargeMwh.HasValue && FullChargeMwh.Value > 0) return;
+            try
+            {
+                if (_capacityQ == null)
+                    _capacityQ = new ManagementObjectSearcher("root\\WMI",
+                        "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity");
+
+                foreach (ManagementObject mo in _capacityQ.Get())
+                {
+                    using (mo) { FullChargeMwh = ToInt(mo["FullChargedCapacity"]); }
+                    break;
+                }
+                if (RemainingMwh.HasValue && FullChargeMwh.HasValue && FullChargeMwh.Value > 0)
+                    PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / FullChargeMwh.Value);
+            }
+            catch (Exception ex) { LastError = ex.Message; }
+        }
+
+        /// <summary>The original path, kept for firmware the syscall cannot read.</summary>
         void ReadWmi()
         {
             if (_statusQ == null)
@@ -180,6 +265,8 @@ namespace PowerDial
                 PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / FullChargeMwh.Value);
         }
 
+        ManagementObjectSearcher _statusQ;
+
         static int? ToInt(object o)
         {
             if (o == null) return null;
@@ -191,6 +278,35 @@ namespace PowerDial
             if (o == null) return false;
             try { return Convert.ToBoolean(o); } catch { return false; }
         }
+
+        const int SystemBatteryState = 5;
+
+        /// <summary>
+        /// SYSTEM_BATTERY_STATE, as powerbase.h declares it. Capacities and Rate are in
+        /// mW / mWh; 0xFFFFFFFF means the firmware does not know.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        struct SYSTEM_BATTERY_STATE
+        {
+            public byte AcOnLine;
+            public byte BatteryPresent;
+            public byte Charging;
+            public byte Discharging;
+            public byte Spare1a, Spare1b, Spare1c, Spare1d;
+            public uint MaxCapacity;
+            public uint RemainingCapacity;
+            public uint Rate;                 // ignored - see ReadPower
+            public uint EstimatedTime;
+            public uint DefaultAlert1;
+            public uint DefaultAlert2;
+        }
+
+        // Same reasoning as the kernel32 import below: pinned to System32 so a DLL
+        // dropped beside the exe cannot be loaded in its place.
+        [DllImport("powrprof.dll", SetLastError = false)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        static extern int CallNtPowerInformation(int level, IntPtr input, int inputSize,
+                                                 out SYSTEM_BATTERY_STATE output, int outputSize);
 
         [StructLayout(LayoutKind.Sequential)]
         struct POWER_STATUS

@@ -160,8 +160,10 @@ namespace PowerDial
 
                 _original = new Preset {
                     Name = "Original", Code = OriginalCode, Friendly = "Original settings",
-                    Blurb = "How this laptop was set up before PowerDial changed anything. " +
-                            "Kept as the reference every other mode is measured against.",
+                    // One sentence. The second half - that this is the reference every
+                    // other mode is measured against - is what the info dot on the card
+                    // is for, and this blurb is shown in the narrowest card on Overview.
+                    Blurb = "How this laptop was set up before PowerDial changed anything.",
                     Values = vals
                 };
                 return _original;

@@ -611,13 +611,26 @@ namespace PowerDial
 
         public readonly PillButton Change = new PillButton();
 
+        /// <summary>
+        /// How tall the mode box needs to be for its blurb at the current width.
+        ///
+        /// It was a constant 68 - two lines of 12px text - and the blurb is whatever the
+        /// mode's description happens to be. Original settings needs three lines in this
+        /// card, which is the narrower half of the pair, so the third was drawn outside
+        /// the rectangle GDI+ was clipping to and came out sliced through the middle.
+        /// </summary>
+        int _boxH = MinBoxH;
+
+        const int MinBoxH = 68;
+        const int BoxY = 70;
+
+        /// <summary>From the bottom of the box to the bottom of the card: the measured
+        /// figure and the air around it.</summary>
+        const int BelowBox = 74;
+
         public ModeSummaryCard()
         {
-            // The footer line came out, so the card no longer needs the height that was
-            // holding it - 212 closes the gap without crowding the measured figure. It
-            // matches TopAppsCard beside it: two cards in a row at different heights read
-            // as one of them having failed to finish.
-            Height = 212;
+            Height = BoxY + MinBoxH + BelowBox;
             AccessibleRole = AccessibleRole.Grouping;
 
             Change.Text = "Change";
@@ -630,6 +643,26 @@ namespace PowerDial
         {
             AccessibleName = Known ? "Power mode: " + Mode : "Power mode: custom settings";
             AccessibleDescription = Blurb;
+        }
+
+        /// <summary>
+        /// Measure the blurb at the width this card actually got, and grow to fit it.
+        ///
+        /// Has to run after the width is settled and whenever the blurb changes, because
+        /// how many lines it wraps to depends on both. Returns the height so the caller
+        /// can level the card beside it.
+        /// </summary>
+        public int Fit(Graphics g)
+        {
+            float tx = 16 + (Known ? 24 : 0);
+            float textW = Math.Max(60, Math.Max(80, Width - 40) - tx - 14);
+            float blurbH = string.IsNullOrEmpty(Blurb)
+                ? 0
+                : g.MeasureString(Blurb, Theme.Small, (int)textW).Height;
+
+            _boxH = Math.Max(MinBoxH, (int)Math.Ceiling(30 + blurbH + 12));
+            Height = BoxY + _boxH + BelowBox;
+            return Height;
         }
 
         protected override void OnSizeChanged(EventArgs e)
@@ -646,7 +679,15 @@ namespace PowerDial
 
             Theme.Str(g, "Power mode", Theme.Section, Theme.Save, 20, 20);
 
-            Rectangle box = new Rectangle(20, 70, Math.Max(80, Width - 40), 68);
+            // Measured here rather than trusting _boxH, so a paint that arrives before
+            // Fit has run still draws a box the text fits inside.
+            float txIn = 16 + (Known ? 24 : 0);
+            int boxW = Math.Max(80, Width - 40);
+            float bw = Math.Max(60, boxW - txIn - 14);
+            float bh = string.IsNullOrEmpty(Blurb) ? 0 : g.MeasureString(Blurb, Theme.Small, (int)bw).Height;
+            int boxH = Math.Max(_boxH, (int)Math.Ceiling(30 + bh + 12));
+
+            Rectangle box = new Rectangle(20, BoxY, boxW, boxH);
             Theme.FillRound(g, box, 6, Known ? Color.FromArgb(30, Theme.Save) : Theme.Inset,
                             Known ? Theme.Save : Theme.Edge);
 
@@ -658,22 +699,25 @@ namespace PowerDial
             }
 
             Theme.Str(g, Known ? Mode : "Custom settings", Theme.Body, Theme.Text, tx, box.Y + 9);
-            RectangleF bb = new RectangleF(tx, box.Y + 30, box.Width - (tx - box.X) - 14, 32);
+            RectangleF bb = new RectangleF(tx, box.Y + 30, bw, bh + 4);
             using (SolidBrush b = new SolidBrush(Theme.Dim))
                 g.DrawString(Blurb, Theme.Small, b, bb);
 
             // The lower half used to be empty. What it cost is measured already, so it
-            // goes here rather than being left to the Insights page alone.
+            // goes here rather than being left to the Insights page alone. It follows the
+            // box down rather than sitting at fixed offsets, which is what made a longer
+            // blurb collide with it.
+            int below = box.Bottom + 14;
             if (Watts.HasValue)
             {
-                Theme.Str(g, "Measured here", Theme.Small, Theme.Mute, 20, 152);
-                Theme.Str(g, Watts.Value.ToString("0.0") + " W", Theme.Stat, Theme.Lead, 20, 170);
-                Theme.Str(g, "over " + Minutes + " min on battery", Theme.Small, Theme.Mute, 78, 176);
+                Theme.Str(g, "Measured here", Theme.Small, Theme.Mute, 20, below);
+                Theme.Str(g, Watts.Value.ToString("0.0") + " W", Theme.Stat, Theme.Lead, 20, below + 18);
+                Theme.Str(g, "over " + Minutes + " min on battery", Theme.Small, Theme.Mute, 78, below + 24);
             }
             else
             {
-                Theme.Str(g, "Not measured yet", Theme.Body, Theme.Dim, 20, 156);
-                Theme.Str(g, "use this mode for five minutes on battery", Theme.Small, Theme.Mute, 20, 178);
+                Theme.Str(g, "Not measured yet", Theme.Body, Theme.Dim, 20, below + 4);
+                Theme.Str(g, "use this mode for five minutes on battery", Theme.Small, Theme.Mute, 20, below + 26);
             }
 
             // "Read from Windows, not assumed." used to sit here. It was true of every
@@ -1252,6 +1296,22 @@ namespace PowerDial
             SeeAll.BackColor = Theme.Panel;
             SeeAll.Size = new Size(142, 34);
             Controls.Add(SeeAll);
+        }
+
+        /// <summary>
+        /// Height follows how many rows there are to draw.
+        ///
+        /// A side with no name is not drawn - which is how the card collapses to one row
+        /// when you are already on your original settings and there is nothing to compare
+        /// them against. Without this it kept the space for the row it was not drawing.
+        /// </summary>
+        public void Fit()
+        {
+            int rows = 0;
+            if (Base.Name.Length > 0) rows++;
+            if (Now.Name.Length > 0) rows++;
+            Height = FirstRowY + Math.Max(1, rows) * Pitch + 36;
+            Describe();
         }
 
         public void Describe()

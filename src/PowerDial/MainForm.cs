@@ -1630,6 +1630,9 @@ namespace PowerDial
                 ? "These settings do not match any mode. Something changed them in Windows or another app."
                 : pr.Blurb;
             _cardMode.Describe();
+
+            // The blurb just changed, so the card may need a different height for it.
+            FitOverviewPair();
             _cardMode.Invalidate();
 
             _cardApps.Rows.Clear();
@@ -1680,6 +1683,33 @@ namespace PowerDial
                 px += bw + 8;
             }
             return outp;
+        }
+
+        /// <summary>
+        /// Size the Power mode card to its blurb, then bring the apps card level with it.
+        ///
+        /// The mode card is the narrower half and its text is whatever the mode's
+        /// description happens to be, so its height is content, not a constant. Run after
+        /// the widths are final - how many lines the blurb wraps to depends on the width -
+        /// and again whenever the blurb changes.
+        /// </summary>
+        void FitOverviewPair()
+        {
+            if (_cardMode == null || _cardApps == null || _overviewPair == null) return;
+
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                _cardMode.Fit(g);
+            }
+
+            // Two cards side by side at different heights read as one of them having
+            // failed to finish, so the apps card takes whichever is taller.
+            int h = Math.Max(212, _cardMode.Height);
+            _cardMode.Height = h;
+            _cardApps.Height = h;
+            _overviewPair.Height = h;
         }
 
         /// <summary>
@@ -1981,7 +2011,12 @@ namespace PowerDial
 
             if (_modeCode == Presets.OriginalCode)
             {
-                // Nothing to compare against itself. Say what it would take instead.
+                // One row, not the same row twice. There is nothing to compare these
+                // against yet, and printing them a second time under a different label
+                // said that badly - a side with no name is not drawn, and Fit takes the
+                // space back with it.
+                nowSide.Name = "";
+
                 _cardVsOriginal.Verdict = "You are on your original settings";
                 _cardVsOriginal.VerdictColor = Theme.Dim;
                 _cardVsOriginal.Note = "Pick a mode on Power modes and this will say what it was worth.";
@@ -2029,7 +2064,7 @@ namespace PowerDial
                 }
             }
 
-            _cardVsOriginal.Describe();
+            _cardVsOriginal.Fit();
             _cardVsOriginal.Invalidate();
         }
 
@@ -2334,7 +2369,7 @@ namespace PowerDial
                 _cardMode.Width = modeW;
                 _cardApps.Location = new Point(modeW + gap, 0);
                 _cardApps.Width = Math.Max(160, w - modeW - gap);
-                _overviewPair.Height = Math.Max(_cardMode.Height, _cardApps.Height);
+                FitOverviewPair();
             }
             _wattsStrip.Left = _readout.Left;
 

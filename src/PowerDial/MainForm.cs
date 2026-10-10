@@ -689,7 +689,7 @@ namespace PowerDial
             // Battery health is not an insight about your usage - it is a fact about the
             // hardware, it changes over months rather than minutes, and nothing in this app
             // can act on it. It gets its own page rather than a footnote under the charts.
-            Card hc = new Card { Width = W, Height = 188, Margin = new Padding(0, 0, 0, 10) };
+            Card hc = new Card { Width = W, Height = 210, Margin = new Padding(0, 0, 0, 10) };
             _cardHealth = hc;
             hc.Controls.Add(new Label {
                 Text = "How much charge it still holds", Location = new Point(14, 12), AutoSize = true,
@@ -709,8 +709,11 @@ namespace PowerDial
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Empty = "Windows does not report this battery's capacity on this PC." };
             hc.Controls.Add(_barHealth);
+            // Three lines rather than two: the note gains a sentence about what the
+            // missing capacity costs in hours once a draw figure exists, and at the
+            // narrowest window that wrapped past a 40px label.
             _healthNote = new Label {
-                Location = new Point(14, 136), Size = new Size(W - 30, 40),
+                Location = new Point(14, 136), Size = new Size(W - 30, 62),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             hc.Controls.Add(_healthNote);
@@ -1197,7 +1200,9 @@ namespace PowerDial
                     break;
             }
             _pageTitle.AccessibleName = _pageTitle.Title;
-            _pageTitle.Height = _pageTitle.Subtitle.Length > 0 ? 82 : 58;
+            // 82 was one line of subtitle. Every one of these wraps to two at the
+            // narrowest window, and the second was being clipped away.
+            _pageTitle.Fit();
             _pageTitle.Invalidate();
         }
 
@@ -1256,24 +1261,24 @@ namespace PowerDial
             _nav.Add("diagnostics", "Diagnostics");
             _nav.SelectionChanged += (s, e) => SetPage(_nav.Selected);
 
-            // An action, not a page - so it sits under the entries with a gap, in body
-            // weight rather than as a nav item, and never takes the current-page marker.
-            // Closing the window already does this; saying so where people can see it
-            // beats a balloon shown once on the first close.
-            _background = new PillButton {
-                Text = "Run in background",
-                Location = new Point(12, 16 + 6 * 42 + 14),
-                Size = new Size(Rail - 24, 34),
-                BackColor = Theme.Sidebar
-            };
-            _background.Click += (s, e) => HideToTray();
-            _nav.Controls.Add(_background);
-
             _status = new StatusBlock {
                 Width = Rail,
                 Location = new Point(0, Math.Max(240, ClientSize.Height) - 96)
             };
             _nav.Controls.Add(_status);
+
+            // An action, not a page - so it sits at the foot of the rail, directly above the
+            // battery summary, in body weight rather than as a nav item, and never takes the
+            // current-page marker. Closing the window already does this; saying so where
+            // people can see it beats a balloon shown once on the first close.
+            _background = new PillButton {
+                Text = "Run in background",
+                Size = new Size(Rail - 24, 34),
+                BackColor = Theme.Sidebar
+            };
+            _background.Location = new Point(12, _status.Top - _background.Height - 12);
+            _background.Click += (s, e) => HideToTray();
+            _nav.Controls.Add(_background);
 
             Controls.Add(_nav);
             _nav.BringToFront();
@@ -2334,6 +2339,8 @@ namespace PowerDial
                 _nav.Height = ClientSize.Height;
                 if (_status != null)
                     _status.Location = new Point(0, Math.Max(200, _nav.Height - _status.Height));
+                if (_background != null && _status != null)
+                    _background.Location = new Point(12, _status.Top - _background.Height - 12);
             }
 
             _chrome.Location = new Point(Rail, 0);
@@ -2348,6 +2355,7 @@ namespace PowerDial
             _readout.Width = w;
             _wattsStrip.Width = w;
             _readout.Left = Chrome + extra / 2;
+            if (_pageTitle != null) { _pageTitle.Width = w; _pageTitle.Fit(); }
             if (_cardVsOriginal != null) _cardVsOriginal.Width = w;
             if (_cardSaving != null) _cardSaving.Width = w;
             if (_cardModeCost != null) _cardModeCost.Width = w;
@@ -3372,8 +3380,12 @@ namespace PowerDial
             int y = 0;
             foreach (Suggestion s in _fixes)
             {
-                _fixList.Controls.Add(BuildFix(s, y));
-                y += 108;
+                // Height comes back from the card rather than being assumed: the detail
+                // sentence wraps to two lines on most of these and three on a few, and a
+                // fixed 108 clipped the third and overlapped the next card.
+                Card built = BuildFix(s, y);
+                _fixList.Controls.Add(built);
+                y += built.Height + 8;
             }
 
             _fixList.Height = Math.Max(1, y - 8);
@@ -3471,8 +3483,19 @@ namespace PowerDial
             };
             c.Controls.Add(dot);
 
+            // Measured, not boxed at 32px. The detail is a full sentence explaining what
+            // is wrong and what the change costs, and the longer ones ran past it.
+            int detailW = w - 34;
+            int detailH;
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics mg = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(mg);
+                detailH = (int)Math.Ceiling(Theme.WrapHeight(mg, s.Detail, Theme.Small, detailW));
+            }
+
             Label detail = new Label {
-                Text = s.Detail, Location = new Point(12, 30), Size = new Size(w - 34, 32),
+                Text = s.Detail, Location = new Point(12, 30), Size = new Size(detailW, Math.Max(32, detailH + 2)),
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Inset, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(detail);
@@ -3481,9 +3504,12 @@ namespace PowerDial
             // produce on the left of it. Reading order now runs statement, consequence,
             // then the control that causes it - rather than offering the button first and
             // putting what it would do at the far end of the row.
+            int rowY = detail.Bottom + 10;
+            c.Height = rowY + 30 + 12;
+
             int actW = ButtonWidth(s.ActionLabel);
             PillButton act = new PillButton {
-                Text = s.ActionLabel, Location = new Point(w - 14 - actW, 62), Size = new Size(actW, 30),
+                Text = s.ActionLabel, Location = new Point(w - 14 - actW, rowY), Size = new Size(actW, 30),
                 Primary = s.CanApply, BackColor = Theme.Inset,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
@@ -3500,7 +3526,7 @@ namespace PowerDial
                     Theme.StrRight(g, "~" + local.Gain.Value.ToString("0.0") + " W", Theme.Value, Theme.Save, c.Width - 34, 6);
                 string change = local.Change;
                 if (change.Length > 0)
-                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, actLocal.Left - 14, 70);
+                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, actLocal.Left - 14, actLocal.Top + 8);
             };
 
             return c;

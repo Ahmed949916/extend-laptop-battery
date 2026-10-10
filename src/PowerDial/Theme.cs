@@ -358,6 +358,32 @@ namespace PowerDial
                 g.DrawString(s, f, b, x, y);
         }
 
+        /// <summary>
+        /// Draw wrapped paragraph text, and report how tall it turned out.
+        ///
+        /// GDI+ clips a string to the rectangle it is given, so every place this codebase
+        /// passed a guessed height was one long sentence away from slicing a line through
+        /// the middle. There is no height to guess here: the rectangle is as tall as the
+        /// text needs, and the return value is what a caller lays the next thing out
+        /// against - or sizes its card from.
+        /// </summary>
+        public static float Wrap(Graphics g, string s, Font f, Color c, float x, float y, float width)
+        {
+            if (string.IsNullOrEmpty(s) || width < 1) return 0;
+            float h = g.MeasureString(s, f, (int)width).Height;
+            using (SolidBrush b = new SolidBrush(c))
+                g.DrawString(s, f, b, new RectangleF(x, y, width, h + 2));
+            return h;
+        }
+
+        /// <summary>How tall Wrap would draw it, without drawing it. For a card that has
+        /// to know its own height before it paints.</summary>
+        public static float WrapHeight(Graphics g, string s, Font f, float width)
+        {
+            if (string.IsNullOrEmpty(s) || width < 1) return 0;
+            return g.MeasureString(s, f, (int)width).Height;
+        }
+
         public static void StrRight(Graphics g, string s, Font f, Color c, float right, float y)
         {
             SizeF sz = g.MeasureString(s, f);

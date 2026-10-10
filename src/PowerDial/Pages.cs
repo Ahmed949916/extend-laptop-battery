@@ -28,18 +28,37 @@ namespace PowerDial
             AccessibleRole = AccessibleRole.StaticText;
         }
 
+        /// <summary>
+        /// Tall enough for the subtitle at this width.
+        ///
+        /// The callers set 82 or 58 by hand, which is one line of subtitle - and at the
+        /// narrowest window every one of these subtitles wraps to two.
+        /// </summary>
+        public void Fit()
+        {
+            if (Subtitle.Length == 0) { Height = 58; return; }
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                float h = Theme.WrapHeight(g, Subtitle, Theme.Body, Math.Max(80, Width - 20));
+                Height = (int)Math.Ceiling(48 + h + 12);
+            }
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            Invalidate();
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
             Theme.Quality(g);
             g.Clear(BackColor);
             Theme.Str(g, Title, Theme.Page, Theme.Lead, 2, 10);
-            if (Subtitle.Length > 0)
-            {
-                RectangleF box = new RectangleF(2, 48, Math.Max(80, Width - 20), 24);
-                using (SolidBrush b = new SolidBrush(Theme.Dim))
-                    g.DrawString(Subtitle, Theme.Body, b, box);
-            }
+            Theme.Wrap(g, Subtitle, Theme.Body, Theme.Dim, 2, 48, Math.Max(80, Width - 20));
         }
     }
 
@@ -168,11 +187,7 @@ namespace PowerDial
             else if (WarnText.Length > 0) StatusCard.Pill(g, x, 24, WarnText, Theme.Spend);
 
             int textW = Math.Max(120, Width - TextX - RightW - 20);
-            RectangleF bb = new RectangleF(TextX, 48, textW, 60);
-            using (SolidBrush b = new SolidBrush(Theme.Dim))
-                g.DrawString(Blurb, Theme.Body, b, bb);
-
-            float blurbH = g.MeasureString(Blurb, Theme.Body, textW).Height;
+            float blurbH = Theme.Wrap(g, Blurb, Theme.Body, Theme.Dim, TextX, 48, textW);
             float cx = TextX;
             float cy = 48 + blurbH + 14;
             foreach (string chip in Chips)
@@ -229,7 +244,13 @@ namespace PowerDial
 
         public StatusCard()
         {
-            Height = 150;
+            // 150 fitted three lines of note. The longest of them - "Windows does not
+            // report a reliable original capacity for this pack" - wraps to four in the
+            // narrowest column the card ever gets, and a fourth line was being sliced
+            // through the middle. Sized for the worst case rather than measured, because
+            // this card is the one thing on Overview whose height should not twitch as
+            // the figures change under it.
+            Height = 178;
             AccessibleRole = AccessibleRole.Grouping;
         }
 
@@ -262,9 +283,9 @@ namespace PowerDial
             if (!HasBattery)
             {
                 Theme.Str(g, "Mains power", Theme.Head, Theme.Save, 24, 22);
-                Theme.Str(g, "This PC has no battery, so there is no runtime to extend. " +
-                             "The power settings and the process list still apply.",
-                          Theme.Body, Theme.Dim, 24, 52);
+                Theme.Wrap(g, "This PC has no battery, so there is no runtime to extend. " +
+                              "The power settings and the process list still apply.",
+                           Theme.Body, Theme.Dim, 24, 52, Math.Max(120, Width - 48));
                 return;
             }
 
@@ -293,18 +314,20 @@ namespace PowerDial
                           Theme.Small, Theme.Mute, 24, 116);
 
             using (Pen p = new Pen(Theme.Edge, 1f))
-                g.DrawLine(p, 244, 22, 244, Height - 22);
+                g.DrawLine(p, 244, 22, 244, Math.Max(40, Height - 22));
 
             // ---- the three measurements that follow from it ---------------------------
             int x = 272;
             int col = Math.Max(150, (Width - 272 - 24) / 3);
 
+            float noteH = 0;
+
             string left = OnAc ? "Paused" : (HoursLeft.HasValue ? Hm(HoursLeft.Value) : "Measuring");
-            Figure(g, x, "Time left", left, OnAc
+            noteH = Math.Max(noteH, Figure(g, x, "Time left", left, OnAc
                 ? "Readings pause while the laptop is charging."
                 : (HoursLeft.HasValue
                     ? "Estimated from your measured usage. It moves as your workload changes."
-                    : "Needs a few recorded minutes on battery before it can say."), Theme.Text, col);
+                    : "Needs a few recorded minutes on battery before it can say."), Theme.Text, col));
 
             // "16 s" in the place a wattage goes reads as the answer to "how much am I
             // using" - so the figure stays a dash until there is one, and the countdown
@@ -323,17 +346,17 @@ namespace PowerDial
                     : (MeasuringLeft > 0
                         ? "Measuring: the first reading lands in " + MeasuringLeft + " seconds."
                         : "Measuring how much power this laptop draws."));
-            Figure(g, x + col, "Using now", draw, drawNote,
-                   (!OnAc && Watts.HasValue) ? Theme.Text : Theme.Dim, col);
+            noteH = Math.Max(noteH, Figure(g, x + col, "Using now", draw, drawNote,
+                   (!OnAc && Watts.HasValue) ? Theme.Text : Theme.Dim, col));
 
             if (Health.HasValue)
             {
                 bool ageing = Health.Value < 80;
                 string hv = Health.Value.ToString("0") + "%";
                 float fx = x + col * 2;
-                Figure(g, fx, "Battery health", hv,
+                noteH = Math.Max(noteH, Figure(g, fx, "Battery health", hv,
                        "Holds " + hv + " of the charge it did when new.",
-                       ageing ? Theme.Spend : Theme.Save, col);
+                       ageing ? Theme.Spend : Theme.Save, col));
 
                 // A word as well as the colour: "amber" is not a status anyone can hear.
                 if (ageing)
@@ -357,22 +380,31 @@ namespace PowerDial
             }
             else
             {
-                Figure(g, x + col * 2, "Battery health", "Unknown",
+                noteH = Math.Max(noteH, Figure(g, x + col * 2, "Battery health", "Unknown",
                        "Windows does not report a reliable original capacity for this pack.",
-                       Theme.Dim, col);
+                       Theme.Dim, col));
             }
+
+            // noteH is what the tallest of the three actually took. Nothing is resized
+            // from it - a control cannot resize itself inside its own paint without
+            // risking a loop - so the card is simply tall enough for the worst case and
+            // this stays as the check that it still is.
+            System.Diagnostics.Debug.Assert(82 + noteH + 12 <= Height,
+                "StatusCard is too short for its notes at this width");
         }
 
         /// <summary>One labelled measurement: what it is, the figure, and where it came
         /// from. The provenance line is not decoration - it is what stops a measured
         /// number being read as a promise.</summary>
-        static void Figure(Graphics g, float x, string label, string value, string note, Color c, int col)
+        static float Figure(Graphics g, float x, string label, string value, string note, Color c, int col)
         {
             Theme.Str(g, label, Theme.Small, Theme.Dim, x, 24);
             Theme.Str(g, value, Theme.Stat, c, x, 44);
-            RectangleF box = new RectangleF(x, 82, col - 18, 46);
-            using (SolidBrush b = new SolidBrush(Theme.Mute))
-                g.DrawString(note, Theme.Small, b, box);
+
+            // 46px was three lines, and two of these notes need four at the narrowest
+            // column - "Windows does not report a reliable original capacity for this
+            // pack" among them. Returns what it used so the card can size itself.
+            return Theme.Wrap(g, note, Theme.Small, Theme.Mute, x, 82, col - 18);
         }
 
         /// <summary>
@@ -571,18 +603,14 @@ namespace PowerDial
 
             Theme.Str(g, Title, Theme.Head, Theme.Text, 68, 22);
 
+            // 80 and 44 were guesses at how tall a body and a caveat get. Reflow already
+            // measured them to place the buttons; the paint was boxing them at a
+            // different number, so a long suggestion title clipped here while the layout
+            // below it was correctly spaced for text that had been cut off.
             float y = 58;
-            RectangleF box = new RectangleF(68, y, Math.Max(80, Width - 92), 80);
-            using (SolidBrush b = new SolidBrush(Theme.Dim))
-                g.DrawString(Body, Theme.Body, b, box);
-            y += TextHeight(g, Body, Theme.Body, Width - 92);
-
-            if (Note.Length > 0)
-            {
-                RectangleF nb = new RectangleF(68, y + 4, Math.Max(80, Width - 92), 44);
-                using (SolidBrush b = new SolidBrush(Theme.Mute))
-                    g.DrawString(Note, Theme.Small, b, nb);
-            }
+            int textW = Math.Max(80, Width - 92);
+            y += Theme.Wrap(g, Body, Theme.Body, Theme.Dim, 68, y, textW);
+            Theme.Wrap(g, Note, Theme.Small, Theme.Mute, 68, y + 4, textW);
 
             if (AllSet && FooterText.Length > 0)
             {
@@ -1030,7 +1058,21 @@ namespace PowerDial
 
         public void Fit()
         {
-            Height = (Idle || Waiting) ? 132 : 178;
+            if (Idle || Waiting)
+            {
+                // The message is the card in this state, so the card is however tall the
+                // message is. It was a flat 132 - two lines' worth - for text that runs
+                // to three or four at the widths this card actually gets.
+                using (Bitmap bmp = new Bitmap(1, 1))
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    Theme.Quality(g);
+                    float h = Theme.WrapHeight(g, Message, Theme.Body, Math.Max(120, Width - 220));
+                    Height = (int)Math.Ceiling(Math.Max(132, 76 + h + 18));
+                }
+            }
+            else Height = 178;
+
             Undo.Visible = !Idle;
             Describe();
         }
@@ -1061,9 +1103,8 @@ namespace PowerDial
 
             if (Idle || Waiting)
             {
-                using (SolidBrush b = new SolidBrush(Theme.Dim))
-                    g.DrawString(Message, Theme.Body, b,
-                                 new RectangleF(20, 76, Math.Max(120, Width - 220), 44));
+                // 44px was two lines and every one of these messages is three or more.
+                Theme.Wrap(g, Message, Theme.Body, Theme.Dim, 20, 76, Math.Max(120, Width - 220));
                 return;
             }
 
@@ -1142,7 +1183,23 @@ namespace PowerDial
 
         public void Fit()
         {
-            Height = Rows.Count == 0 ? 148 : FirstRowY + Rows.Count * Pitch + 22;
+            bool measured = false;
+            foreach (Row r in Rows) if (r.Minutes >= 5) { measured = true; break; }
+
+            if (measured) Height = FirstRowY + Rows.Count * Pitch + 22;
+            else
+            {
+                // Nothing measured yet means the empty sentence is the whole card, so it
+                // decides the height. 148 was a guess that held only while that sentence
+                // stayed short.
+                using (Bitmap bmp = new Bitmap(1, 1))
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    Theme.Quality(g);
+                    float h = Theme.WrapHeight(g, Empty, Theme.Body, Math.Max(120, Width - 40));
+                    Height = (int)Math.Ceiling(Math.Max(148, 78 + h + 18));
+                }
+            }
             Describe();
         }
 
@@ -1186,8 +1243,7 @@ namespace PowerDial
             int best = Best(), worst = Worst();
             if (best < 0)
             {
-                using (SolidBrush b = new SolidBrush(Theme.Dim))
-                    g.DrawString(Empty, Theme.Body, b, new RectangleF(20, 78, Math.Max(120, Width - 40), 48));
+                Theme.Wrap(g, Empty, Theme.Body, Theme.Dim, 20, 78, Math.Max(120, Width - 40));
                 return;
             }
 
@@ -1305,12 +1361,24 @@ namespace PowerDial
         /// when you are already on your original settings and there is nothing to compare
         /// them against. Without this it kept the space for the row it was not drawing.
         /// </summary>
-        public void Fit()
+        /// <summary>Where the note starts: under whichever rows were drawn.</summary>
+        int NoteY()
         {
             int rows = 0;
             if (Base.Name.Length > 0) rows++;
             if (Now.Name.Length > 0) rows++;
-            Height = FirstRowY + Math.Max(1, rows) * Pitch + 36;
+            return FirstRowY + Math.Max(1, rows) * Pitch + 6;
+        }
+
+        public void Fit()
+        {
+            using (Bitmap bmp = new Bitmap(1, 1))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                Theme.Quality(g);
+                float h = Theme.WrapHeight(g, Note, Theme.Small, Math.Max(120, Width - 40));
+                Height = (int)Math.Ceiling(NoteY() + h + 18);
+            }
             Describe();
         }
 
@@ -1372,8 +1440,9 @@ namespace PowerDial
             Bar(g, FirstRowY + Pitch, Now, figB, max, barMax,
                 better ? Theme.Save : (worse ? Theme.Spend : Theme.Data));
 
-            if (Note.Length > 0)
-                Theme.Str(g, Note, Theme.Small, Theme.Mute, 20, Height - 30);
+            // Drawn as one line, it simply ran off the right edge of the card - the
+            // longest of these notes is a full sentence of instructions.
+            Theme.Wrap(g, Note, Theme.Small, Theme.Mute, 20, NoteY(), Math.Max(120, Width - 40));
         }
 
         const int NameW = 158;

@@ -30,6 +30,20 @@ raises the window that already exists rather than starting another.
 
 ## Pages
 
+Comparison figures are **observed averages**, not proof that a setting caused a saving.
+Insights has an optional **Similar CPU sessions** filter shared with the Overview
+comparison. It matches the latest qualifying session in the current mode against sessions
+with the same most frequently busiest app and average CPU within 25% (at least 10
+percentage points of one core). Sessions need five consecutive battery records; AC,
+mode changes, gaps over 90 seconds and the last recorded settings change split them.
+GPU and display activity can still differ. No matching data means no comparison, not
+an automatic fallback to unfiltered averages. The charts remain unfiltered.
+
+**Most CPU-active apps** reports processor time, not per-app energy. Suspected GPU drain
+remains separately identified in Diagnostics. History reads all retained monthly files,
+and battery full-charge capacity refreshes every six hours and on AC transitions; failed
+reads keep the last valid capacity and retry after five minutes.
+
 A sidebar down the left, six entries, nothing hidden behind a mode. The app opens on
 **Overview** every time rather than restoring whichever page you closed on.
 

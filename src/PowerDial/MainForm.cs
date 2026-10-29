@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -8,7 +8,7 @@ using System.Windows.Forms;
 
 namespace PowerDial
 {
-    public sealed class MainForm : Form
+    public sealed partial class MainForm : Form
     {
         // Everything is laid out once at this width, then stretched to the window by
         // Relayout. Building at a fixed width keeps the arithmetic in one place; the
@@ -44,6 +44,8 @@ namespace PowerDial
         Card _wattsStrip;           // "Where your watts go", pinned so it never scrolls away
         SavingCard _cardSaving;     // Insights: what the last change was actually worth
         ModeCostCard _cardModeCost; // Insights: what each mode has cost, measured
+        ComparisonFilterCard _comparisonFilter;
+        bool _similarSessions;
         Card _cardHealth;           // Battery health, its own page
         Card _cardHealthAdvice;     // and the one honest thing to say about wear
         Label _healthPct;           // the headline percentage
@@ -88,7 +90,8 @@ namespace PowerDial
         Label _watchSummary;
         Panel _fixList, _fixButtons;
         Card _fixCard;
-        Label _fixSummary;
+        Label _fixSummary, _fixSub, _fixWhen;
+        CheckList _fixChecks;
         PillButton _fixApplyAll;
         List<Suggestion> _fixes = new List<Suggestion>();
         List<Finding> _findings;
@@ -201,14 +204,16 @@ namespace PowerDial
                 // The battery read stays on its 15-second cadence either way. It is one
                 // kernel call now, and the watts figure is timed over a 60-second window
                 // of these samples, so thinning them out would cost the measurement.
+                CheckMonitorGap();
                 _bat.Poll();
+                CheckPowerSource();
                 PushSample();
 
                 // The process sample is the expensive one. Hidden, the only thing that
                 // needs it is the minute record and its cumulative tally - so it is
                 // taken when that is due, and skipped the other three times.
                 bool recordDue = DueToRecord();
-                if (onScreen || recordDue)
+                if ((onScreen && (_page == "overview" || _page == "insights")) || recordDue)
                 {
                     _procs = _procWatch.Sample();
                     TrackWindowCpu();
@@ -227,6 +232,7 @@ namespace PowerDial
                 }
 
                 MaybeRecord();
+                CheckBatteryTools();
 
                 // CPU is a delta, so the sample taken during startup carried memory
                 // figures and no CPU at all - anything judging a process by what it burns
@@ -243,8 +249,9 @@ namespace PowerDial
             _tick.Tick += (s, e) => {
                 // Sixty wakeups a minute to move a countdown on a window that is not
                 // there. Hiding stops it; ShowFromTray starts it again.
-                if (!Visible || WindowState == FormWindowState.Minimized) return;
-                if (_readout == null || _bat.Watts.HasValue) return;
+                if (!Visible || WindowState == FormWindowState.Minimized || _bat.Watts.HasValue)
+                { _tick.Stop(); return; }
+                if (_readout == null) return;
                 if (_windowStart == DateTime.MinValue) return;
                 int left = Math.Max(0, _bat.WindowSeconds - (int)(DateTime.UtcNow - _windowStart).TotalSeconds);
                 if (left == _readout.MeasuringLeft) return;
@@ -287,6 +294,9 @@ namespace PowerDial
             // than leaving it saying "not measured yet" until the first poll fifteen
             // seconds later - the data is already here.
             RefreshBasic();
+            RefreshOverview();
+            _drainRecords.AddRange(History.Recent(1500));
+            _drainBaseline = BatteryToolsPolicy.Baseline(_drainRecords, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             if (pruned > 0) Log("Cleared " + pruned + " history file(s) older than " + History.KeepMonths + " months.");
 
             Log("Watching " + PowerCfg.ActiveSchemeName() +
@@ -416,47 +426,66 @@ namespace PowerDial
                 "rather than pretending to be fixed."));
             _root.Controls.Add(fixHead);
 
-            _fixCard = new Card { Width = W, Height = 120, Margin = new Padding(0, 0, 0, 12) };
+            // One card, read top to bottom: the verdict, what it rests on in a line under
+            // it, the suggestions, every check that ran, and the actions closing the card
+            // at the right margin once there is something above them to act on.
+            _fixCard = new Card { Width = W, Height = 200, Margin = new Padding(0, 0, 0, 12) };
 
             _fixSummary = new Label {
-                Location = new Point(14, 12), Size = new Size(W - 30, 22),
-                Font = Theme.Title, ForeColor = Theme.Save, BackColor = Theme.Panel,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                Location = new Point(20, 20), Size = new Size(W - 40, 26),
+                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel,
+                AutoEllipsis = true
             };
             _fixCard.Controls.Add(_fixSummary);
 
+            _fixSub = new Label {
+                Location = new Point(20, 50), Size = new Size(W - 40, 20),
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel,
+                AutoEllipsis = true,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _fixCard.Controls.Add(_fixSub);
+
             _fixList = new Panel {
-                Location = new Point(14, 40), Size = new Size(W - 30, 10), BackColor = Theme.Panel,
+                Location = new Point(20, 84), Size = new Size(W - 40, 10), BackColor = Theme.Panel,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _fixCard.Controls.Add(_fixList);
 
-            _fixButtons = new Panel {
-                Location = new Point(14, 58), Size = new Size(W - 30, 38), BackColor = Theme.Panel,
+            _fixChecks = new CheckList {
+                Location = new Point(20, 84), Width = W - 40,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            // Right-aligned, to match the button on every suggestion above them and the
-            // pair on the Overview card. Placed in LayOutFixButtons, which also runs on
-            // resize - the label on Apply changes with the number of findings, so its
-            // width is not a constant either.
+            // Crossing the two-column width changes the list's height, and the card has to
+            // follow it - on resize as well as on a scan.
+            _fixChecks.SizeChanged += (s, e) => FitFixCard();
+            _fixCard.Controls.Add(_fixChecks);
+
+            // Bottom right, under the check list. Placed in LayOutFixButtons, which
+            // also runs on resize - Apply's label counts the findings and the time changes
+            // on every scan, so none of these widths is a constant.
+            _fixButtons = new Panel { Location = new Point(W - 300, 14), Size = new Size(280, 36), BackColor = Theme.Panel };
+            _fixWhen = new Label {
+                AutoSize = false, Font = Theme.Small, ForeColor = Theme.Mute, BackColor = Theme.Panel,
+                TextAlign = ContentAlignment.MiddleRight
+            };
+            _fixButtons.Controls.Add(_fixWhen);
             _fixApplyAll = new PillButton {
                 Text = "Apply every fix", Glyph = Theme.GlyphCheck,
-                Size = new Size(176, 36), Primary = true, BackColor = Theme.Panel,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Size = new Size(176, 36), Primary = true, BackColor = Theme.Panel
             };
             _fixApplyAll.Click += (s, e) => ApplyAllFixes();
             _fixButtons.Controls.Add(_fixApplyAll);
             _fixRecheck = new PillButton {
                 Text = "Check again", Glyph = Theme.GlyphRefresh,
-                Size = new Size(140, 36), BackColor = Theme.Panel,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Size = new Size(140, 36), BackColor = Theme.Panel
             };
             _fixRecheck.Click += (s, e) => RunBusy(_fixRecheck, delegate {
                 LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); });
             _fixButtons.Controls.Add(_fixRecheck);
-            _fixButtons.SizeChanged += (s, e) => LayOutFixButtons();
-            LayOutFixButtons();
             _fixCard.Controls.Add(_fixButtons);
+            _fixCard.SizeChanged += (s, e) => LayOutFixButtons();
+            LayOutFixButtons();
 
             _root.Controls.Add(_fixCard);
 
@@ -593,7 +622,7 @@ namespace PowerDial
 
             Card pc = new Card { Width = W, Height = 292, Margin = new Padding(0, 0, 0, 10) };
             _procLabel = new Label {
-                Text = "Apps using the most power", Location = new Point(14, 10), Size = new Size(300, 20),
+                Text = "Most CPU-active apps", Location = new Point(14, 10), Size = new Size(300, 20),
                 Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel,
                 // The controls share this line. When the window is too narrow for both,
                 // the heading gives way rather than the buttons wrapping or landing on
@@ -758,7 +787,7 @@ namespace PowerDial
             // away rather than taking a screen of space to say "all clear".
             _watchToggle = new SectionToggle {
                 Width = W, Caption = "GPU watch",
-                Sub = "only matters on a switchable-graphics laptop",
+                Sub = "Suspected GPU drain - separate from CPU activity",
                 Margin = new Padding(0, 10, 0, 0)
             };
             _watchToggle.Toggled += (s, e) => {
@@ -980,6 +1009,7 @@ namespace PowerDial
             BuildOverview();
             BuildPowerModes();
             TagSections();
+            BuildBatteryTools();
 
             // TagSections gives everything between the Analytics heading and the next one
             // to Insights, which is right for all of it except the health card - that is a
@@ -1065,6 +1095,7 @@ namespace PowerDial
                 case "Profiles":                return "modes";
                 case "Analytics":               return "insights";
                 case "Battery health":          return "health";
+                case "Battery tools":           return "tools";
                 case "What changes your watts": return "advanced";
                 case "More":                    return "diagnostics";
 
@@ -1158,7 +1189,8 @@ namespace PowerDial
             // enough to do here.
             if (key == "overview") { RefreshOverview(); RefreshBasic(); }
             else if (key == "modes") RefreshModes();
-            else if (key == "insights") RefreshBasic();
+            else if (key == "insights") { RefreshBasic(); RefreshSessions(); }
+            else if (key == "tools") RefreshBatteryTools();
             else if (key == "health") RefreshAnalytics();
             Relayout();
         }
@@ -1176,13 +1208,17 @@ namespace PowerDial
                     break;
                 case "insights":
                     _pageTitle.Title = "Insights";
-                    _pageTitle.Subtitle = "What your changes were worth, and what this laptop has " +
+                    _pageTitle.Subtitle = "Observed usage comparisons and what this laptop has " +
                                           "actually drawn. Recorded once a minute, kept on disk.";
                     break;
                 case "health":
                     _pageTitle.Title = "Battery health";
                     _pageTitle.Subtitle = "How much charge this battery still holds compared with " +
                                           "when it was new. Read from the hardware.";
+                    break;
+                case "tools":
+                    _pageTitle.Title = "Battery tools";
+                    _pageTitle.Subtitle = "Smart reminders and optional automatic power modes. Runs while PowerDial is open or in the tray.";
                     break;
                 case "advanced":
                     _pageTitle.Title = "Advanced";
@@ -1258,6 +1294,7 @@ namespace PowerDial
             _nav.Add("insights",    "Insights");
             _nav.Add("advanced",    "Advanced");
             _nav.Add("health",      "Battery health");
+            _nav.Add("tools",       "Battery tools");
             _nav.Add("diagnostics", "Diagnostics");
             _nav.SelectionChanged += (s, e) => SetPage(_nav.Selected);
 
@@ -1295,12 +1332,22 @@ namespace PowerDial
         /// </summary>
         void BuildInsightsHeadline()
         {
+            _comparisonFilter = new ComparisonFilterCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
+            _comparisonFilter.Toggle.Click += (s, e) => {
+                _similarSessions = !_similarSessions;
+                _comparisonFilter.Toggle.Selected = _similarSessions;
+                RefreshBasic();
+            };
+            _root.Controls.Add(_comparisonFilter);
+
             _cardSaving = new SavingCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
             _cardSaving.Undo.Click += (s, e) => RestoreBaseline(_cardSaving.Undo);
             _root.Controls.Add(_cardSaving);
 
             _cardModeCost = new ModeCostCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
             _root.Controls.Add(_cardModeCost);
+            _sessionsCard = new SessionSummaryCard { Width = W, Margin = new Padding(0, 0, 0, 10) };
+            _root.Controls.Add(_sessionsCard);
         }
 
         /// <summary>
@@ -1443,7 +1490,7 @@ namespace PowerDial
 
                 "It is also the reference point the rest of the app is measured against. " +
                 "Minutes recorded while you are on these settings are grouped under them " +
-                "like any other mode, so \"What each mode has cost you\" on Insights fills in " +
+                "like any other mode, so \"Observed averages by mode\" on Insights fills in " +
                 "its row - and that row is the only honest answer to \"what is this app " +
                 "actually saving me\", because it is the same laptop, measured the same way, " +
                 "on the settings you started with.";
@@ -1931,6 +1978,11 @@ namespace PowerDial
             }
 
             List<HistPoint> hist = History.All();
+            Comparison.Result comparison = Comparison.Select(hist, _similarSessions, _modeCode,
+                                                               Config.Current.OptimisedAtUnix);
+            hist = comparison.Points;
+            _comparisonFilter.Note = comparison.Note;
+            _comparisonFilter.Fit();
 
             // ------------------------------------------------ what each mode has cost
             _cardModeCost.Rows.Clear();
@@ -1946,6 +1998,9 @@ namespace PowerDial
             }
             _cardModeCost.Empty = "Nothing measured yet. Pick a mode and use the laptop on battery " +
                                   "for a few minutes - this fills in as it goes.";
+            if (_similarSessions)
+                _cardModeCost.Empty = "No matching sessions yet. Use the current mode on battery for at least " +
+                                      "five consecutive minutes, or turn off the filter to see all usage.";
             _cardModeCost.Recorded = RecordedSpan(hist);
             _cardModeCost.Fit();
             _cardModeCost.Invalidate();
@@ -2024,11 +2079,13 @@ namespace PowerDial
 
                 _cardVsOriginal.Verdict = "You are on your original settings";
                 _cardVsOriginal.VerdictColor = Theme.Dim;
-                _cardVsOriginal.Note = "Pick a mode on Power modes and this will say what it was worth.";
+                _cardVsOriginal.Note = "Pick a mode on Power modes to compare observed averages.";
             }
             else if (!baseSide.Known)
             {
-                _cardVsOriginal.Note = Presets.Original == null
+                _cardVsOriginal.Note = _similarSessions
+                    ? "Not enough matching sessions under your original settings. Turn off the filter in Insights to see all usage."
+                    : Presets.Original == null
                     ? "No restore point was captured on this PC, so there is nothing to compare with."
                     : "Nothing recorded on your original settings yet. Power modes has an Original " +
                       "settings card - put them back, use the laptop on battery for a few minutes, " +
@@ -2036,7 +2093,9 @@ namespace PowerDial
             }
             else if (!nowSide.Known)
             {
-                _cardVsOriginal.Note = "Measuring this mode. It needs a few minutes on battery.";
+                _cardVsOriginal.Note = _similarSessions
+                    ? "Not enough matching sessions in this mode. Record a consistent workload on battery, or turn off the filter in Insights."
+                    : "Measuring this mode. It needs a few minutes on battery.";
             }
             else if (baseSide.Hours.HasValue && nowSide.Hours.HasValue)
             {
@@ -2049,7 +2108,7 @@ namespace PowerDial
                 else
                 {
                     _cardVsOriginal.Verdict = OriginalCompareCard.Hm(Math.Abs(delta)) +
-                                              (delta > 0 ? " more" : " less") + " a charge";
+                                              (delta > 0 ? " more" : " less") + " estimated per charge";
                     _cardVsOriginal.VerdictColor = delta > 0 ? Theme.Save : Theme.Spend;
                 }
             }
@@ -2069,6 +2128,9 @@ namespace PowerDial
                 }
             }
 
+            _cardVsOriginal.Note += _similarSessions
+                ? " Similar CPU sessions selected in Insights; GPU/display use may differ."
+                : " All usage; workloads may differ. Filter similar sessions in Insights.";
             _cardVsOriginal.Fit();
             _cardVsOriginal.Invalidate();
         }
@@ -2107,54 +2169,58 @@ namespace PowerDial
             Config c = Config.Current;
             _cardSaving.Detail = "";
 
-            if (!c.BeforeWatts.HasValue || c.OptimisedAtUnix <= 0)
+            if (c.OptimisedAtUnix <= 0)
             {
                 _cardSaving.Idle = true;
                 _cardSaving.Waiting = false;
                 _cardSaving.Message = "Nothing to compare yet. Once you optimise from Overview, or pick " +
-                                      "a mode, this shows what it actually saved - measured on this " +
-                                      "laptop, never estimated.";
+                                      "a mode, this compares observed averages. Workload changes can " +
+                                      "also change power draw.";
                 return;
             }
 
             List<HistPoint> since = new List<HistPoint>();
+            List<HistPoint> before = new List<HistPoint>();
             foreach (HistPoint p in hist)
                 if (p.T >= c.OptimisedAtUnix) since.Add(p);
+                else before.Add(p);
 
+            // Recompute BOTH sides from the selected records. The saved scalar average
+            // cannot be filtered, and must never be mixed with matched after-sessions.
+            RuntimeAverage was = RuntimeAverage.From(before);
             RuntimeAverage after = RuntimeAverage.From(since);
-            if (!after.Known || after.Minutes < 10)
+            if (!was.Known || was.Minutes < 5 || !after.Known || after.Minutes < 10)
             {
                 _cardSaving.Idle = false;
                 _cardSaving.Waiting = true;
-                _cardSaving.Message = "Measuring what that change was worth. It needs about " +
-                                      Math.Max(1, 10 - after.Minutes) +
-                                      " more minutes on battery before it can say - and only minutes " +
-                                      "spent on battery count.";
+                _cardSaving.Message = "Not enough selected records to compare: " + was.Minutes +
+                                      " minutes before, " + after.Minutes + " since. Needs at least 5 before " +
+                                      "and 10 since. " + (_similarSessions
+                                      ? "Turn off the filter to include all recorded usage."
+                                      : "If older records are gone, record a new before period before changing mode.");
                 return;
             }
 
             _cardSaving.Idle = false;
             _cardSaving.Waiting = false;
-            _cardSaving.Before = c.BeforeWatts.Value;
+            _cardSaving.Before = was.Watts;
             _cardSaving.After = after.Watts;
             _cardSaving.Minutes = after.Minutes;
+            _cardSaving.BeforeMinutes = was.Minutes;
 
             double delta = _cardSaving.Before - _cardSaving.After;
-            if (Math.Abs(delta) < 0.15) { _cardSaving.Detail = "no measurable difference yet"; return; }
+            if (Math.Abs(delta) < 0.15) { _cardSaving.Detail = "Similar observed averages; not proof of savings."; return; }
 
-            RuntimeAverage was = new RuntimeAverage();
-            was.Watts = c.BeforeWatts.Value;
-            was.Minutes = c.BeforeMinutes;
             double? fullBefore = was.FromFull(_bat.FullChargeMwh);
             double? fullAfter = after.FromFull(_bat.FullChargeMwh);
 
             if (fullBefore.HasValue && fullAfter.HasValue)
-                _cardSaving.Detail = delta > 0
-                    ? "about " + FmtHours(fullAfter.Value - fullBefore.Value) + " more from a full charge"
-                    : "about " + FmtHours(fullBefore.Value - fullAfter.Value) + " less from a full charge - " +
-                      "you have probably been working the machine harder since";
+                _cardSaving.Detail = "Estimated runtime difference: " +
+                    FmtHours(Math.Abs(fullAfter.Value - fullBefore.Value)) + (delta > 0 ? " more" : " less") +
+                    " per full charge at these averages; not proven savings.";
             else
-                _cardSaving.Detail = delta > 0 ? "drawing less than before" : "drawing more than before";
+                _cardSaving.Detail = "Observed draw is " + (delta > 0 ? "lower" : "higher") +
+                                     "; workload differences may explain the change.";
         }
 
         /// <summary>
@@ -2192,7 +2258,7 @@ namespace PowerDial
             };
 
             _wattsStrip.Controls.Add(new Label {
-                Text = "Apps using the most power", Location = new Point(14, 9), AutoSize = true,
+                Text = "Most CPU-active apps", Location = new Point(14, 9), AutoSize = true,
                 Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
 
             // The figure the list is describing. Measured, never derived - see the info text.
@@ -2219,7 +2285,7 @@ namespace PowerDial
 
             InfoDot cdot = new InfoDot {
                 Location = new Point(W - 32, 11), Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Heading = "Apps using the most power",
+                Heading = "Most CPU-active apps",
                 Body = "The processes that burned the most CPU during the same window the watts figure " +
                        "was timed over, so the two describe the same slice of time rather than the draw " +
                        "from a minute ago and whatever happens to be busy this instant.\n\n" +
@@ -2250,6 +2316,8 @@ namespace PowerDial
         /// </summary>
         void BeginBusy(PillButton on, int steps)
         {
+            _powerBusy = true;
+            _poll.Stop();
             _busyTotal = steps; _busyDone = 0;
             _busyBtn = on;
             if (_busyBtn != null)
@@ -2287,6 +2355,8 @@ namespace PowerDial
             _busyBtn = null;
             _root.Enabled = true;
             _busyTotal = 0; _busyDone = 0;
+            _powerBusy = false;
+            if (!_quitting) _poll.Start();
         }
 
         /// <summary>
@@ -2659,6 +2729,7 @@ namespace PowerDial
         /// </summary>
         void WakeUi()
         {
+            RefreshHistory(true);
             _procs = _procWatch.Sample();
             TrackWindowCpu();
             RefreshReadout();
@@ -2666,6 +2737,8 @@ namespace PowerDial
             RefreshOverview();
             RefreshBasic();
             if (_page == "modes") RefreshModes();
+            if (_page == "insights") RefreshSessions();
+            UpdateCountdownTimer();
             if (!_fixesSeeded) { _fixesSeeded = true; RefreshFixes(); }
         }
 
@@ -2745,6 +2818,7 @@ namespace PowerDial
 
             _tray = new NotifyIcon { Icon = Icon, Visible = true, Text = "PowerDial", ContextMenuStrip = menu };
             _tray.DoubleClick += (s, e) => ShowFromTray();
+            _tray.BalloonTipClicked += (s, e) => { ShowFromTray(); SetPage("tools"); };
         }
 
         /// <summary>Actually exit, rather than hide. The tray menu and nothing else.</summary>
@@ -2839,6 +2913,7 @@ namespace PowerDial
 
         void RefreshProcesses()
         {
+            _procLabel.Text = _sortCpu ? "Most CPU-active apps" : "Apps using the most memory";
             _btnMem.Selected = !_sortCpu; _btnMem.Invalidate();
             _btnCpu.Selected = _sortCpu; _btnCpu.Invalidate();
             _btnBg.Selected = _bgOnly; _btnBg.Invalidate();
@@ -2993,6 +3068,7 @@ namespace PowerDial
 
         void MaybeRecord()
         {
+            if (Machine.HasBattery && !_bat.StatusValid) return;
             DateTime now = DateTime.UtcNow;
             if (_lastHistory != DateTime.MinValue && (now - _lastHistory).TotalSeconds < 60) return;
             double interval = _lastHistory == DateTime.MinValue ? 60 : (now - _lastHistory).TotalSeconds;
@@ -3007,9 +3083,12 @@ namespace PowerDial
                 Cpu = Math.Round(ProcessWatch.TotalCpu(_procs, false), 1),
                 BgMb = Math.Round(ProcessWatch.TotalMb(_procs, true), 0),
                 M = _modeCode,
-                Top = TopSummary()
+                Top = TopSummary(),
+                E = _bat.RemainingMwh,
+                S = _segment
             };
-            History.Append(p, _procs, interval);
+            History.Append(p, _procs, interval > 90 ? 0 : interval);
+            RecordForAlerts(p);
 
             // Saving is best-effort by design, but a failure used to be invisible. Anything
             // that could not be written says so here, once per distinct reason.
@@ -3020,11 +3099,17 @@ namespace PowerDial
                 ShowLog();
             }
 
-            if (draining) _chartWatts.Push(p.W);
-            RefreshHistory(false);
-            RefreshOverview();
-            RefreshBasic();
-            if (_page == "modes") RefreshModes();
+            // Recording and alert baselines continue in the tray. Expensive history
+            // parsing, comparison sorting and card layouts wait until someone can see them.
+            if (Visible && WindowState != FormWindowState.Minimized)
+            {
+                if (draining) _chartWatts.Push(p.W);
+                RefreshHistory(false);
+                if (_page == "overview") RefreshOverview();
+                if (_page == "overview" || _page == "insights" || _page == "modes") RefreshBasic();
+                if (_page == "insights") RefreshSessions();
+                if (_page == "modes") RefreshModes();
+            }
         }
 
         string TopSummary()
@@ -3034,7 +3119,7 @@ namespace PowerDial
             foreach (ProcInfo p in top)
             {
                 if (s.Length > 0) s += "|";
-                s += p.Name + " " + p.CpuPercent.ToString("0.0");
+                s += p.Name + " " + p.CpuPercent.ToString("0.0", CultureInfo.InvariantCulture);
             }
             return s;
         }
@@ -3086,6 +3171,7 @@ namespace PowerDial
         /// </summary>
         void ResetDrawWindow()
         {
+            _batteryPolicy.ResetWindow();
             _bat.ResetWindow();
             _spark.Clear();
             _window.Clear();
@@ -3293,8 +3379,8 @@ namespace PowerDial
             // Plain language, and the same sentence the Overview card uses: this measures
             // processor time, and the app refuses to split measured watts across processes.
             _contribNote.Text = secs > 0
-                ? "Processor time used over the last " + secs + " seconds. More time means more drain."
-                : "Processor time used over the measured window. More time means more drain.";
+                ? "Processor time used over the last " + secs + " seconds. CPU time is not app energy."
+                : "Processor time used over the measured window. CPU time is not app energy.";
 
             // The measured figure the list is describing. Only ever the reading itself: the
             // section refuses to split it across processes, so it must not look split.
@@ -3374,52 +3460,95 @@ namespace PowerDial
         /// </summary>
         void RefreshFixes()
         {
+            // Rows are disposed, not just dropped: Controls.Clear leaves every old row and
+            // its button, label and info dot alive with their handles, once per scan. Later
+            // rather than now, because the scan is often running inside the Click of a
+            // button on one of those rows, which still has its own mouse-up to finish.
+            List<Control> old = new List<Control>();
+            foreach (Control c in _fixList.Controls) old.Add(c);
             _fixList.Controls.Clear();
-            _fixes = Advisor.Scan(_bat, _procs, _findings);
+            if (old.Count > 0)
+            {
+                if (IsHandleCreated)
+                    BeginInvoke((Action)delegate { foreach (Control c in old) c.Dispose(); });
+                else
+                    foreach (Control c in old) c.Dispose();
+            }
+
+            _fixes = Advisor.Scan(_bat, _procs, _findings, _fixChecks.Items);
 
             int y = 0;
             foreach (Suggestion s in _fixes)
             {
-                // Height comes back from the card rather than being assumed: the detail
-                // sentence wraps to two lines on most of these and three on a few, and a
-                // fixed 108 clipped the third and overlapped the next card.
-                Card built = BuildFix(s, y);
+                // Height comes back from the row rather than being assumed: the detail
+                // sentence wraps to two lines on most of these and three on a few.
+                Panel built = BuildFix(s, y);
                 _fixList.Controls.Add(built);
-                y += built.Height + 8;
+                y += built.Height;
             }
 
-            _fixList.Height = Math.Max(1, y - 8);
+            _fixList.Height = Math.Max(1, y);
             _fixList.Visible = _fixes.Count > 0;
-            _fixButtons.Top = _fixes.Count > 0 ? _fixList.Bottom + 10 : _fixList.Top;
 
             int applicable = 0;
             foreach (Suggestion s in _fixes) if (s.CanApply) applicable++;
             _fixApplyAll.Visible = applicable > 1;
             _fixApplyAll.Text = applicable == 2 ? "Apply both" : "Apply all " + applicable;
 
-            // Apply's label just changed and it may have just appeared or gone, so the
-            // row is measured and placed again rather than nudged.
-            LayOutFixButtons();
+            // The time of the scan, beside the button that runs one - otherwise pressing
+            // Check again on a clean PC changed nothing on screen and read as broken.
+            _fixWhen.Text = "Checked " + DateTime.Now.ToShortTimeString();
 
+            int advisory = _fixes.Count - applicable;
             if (_fixes.Count == 0)
             {
                 _fixSummary.ForeColor = Theme.Save;
-                _fixSummary.Text = Machine.HasBattery
-                    ? "Nothing left to suggest - everything this app checks is already set for endurance"
-                    : "No battery on this PC, so there is no runtime to extend";
+                if (Machine.HasBattery)
+                {
+                    _fixSummary.Text = "Nothing left to change";
+                    _fixSub.Text = "Every check below is already set for long battery life. " +
+                                   "It runs again after any change you make here.";
+                }
+                else
+                {
+                    _fixSummary.Text = "No battery, so there is no runtime to extend";
+                    _fixSub.Text = "Battery-side settings do nothing on this PC. The checks that still apply are below.";
+                }
             }
             else
             {
                 _fixSummary.ForeColor = Theme.Spend;
-                string head = _fixes.Count + " thing" + (_fixes.Count == 1 ? "" : "s") + " worth changing";
-                if (applicable == 0) head += ", none of which this app can write for you";
-                else if (applicable < _fixes.Count)
-                    head += "  ·  " + applicable + " can be applied from here";
-                _fixSummary.Text = head;
+                _fixSummary.Text = _fixes.Count + " thing" + (_fixes.Count == 1 ? "" : "s") + " worth changing";
+                string sub = "Most important first. Each button writes the battery side only and reads it back to confirm.";
+                if (applicable == 0)
+                    sub = "None of these is a setting PowerDial can write - each button opens the Windows page where you change it.";
+                else if (advisory > 0)
+                    sub = applicable + " can be applied from here; " + advisory +
+                          (advisory == 1 ? " needs" : " need") + " changing in Windows. Most important first.";
+                _fixSub.Text = sub;
             }
 
-            _fixCard.Height = _fixButtons.Bottom + 12;
-            _root.PerformLayout();
+            // Apply's label just changed and it may have just appeared or gone, so the
+            // row is measured and placed again rather than nudged.
+            LayOutFixButtons();
+            _fixChecks.Fit();
+            FitFixCard();
+        }
+
+        /// <summary>Stack the check list under whatever is above it, and size the card to end
+        /// just after it.</summary>
+        void FitFixCard()
+        {
+            if (_fixCard == null || _fixChecks == null) return;
+            int top = _fixes.Count > 0 ? _fixList.Bottom + 12 : _fixSub.Bottom + 18;
+            if (_fixChecks.Top != top) _fixChecks.Top = top;
+            if (_fixButtons != null) _fixButtons.Top = _fixChecks.Bottom + 16;
+            int h = (_fixButtons != null ? _fixButtons.Bottom : _fixChecks.Bottom) + 18;
+            if (_fixCard.Height != h)
+            {
+                _fixCard.Height = h;
+                _root.PerformLayout();
+            }
         }
 
         /// <summary>
@@ -3431,61 +3560,75 @@ namespace PowerDial
         /// </summary>
         void LayOutFixButtons()
         {
-            if (_fixButtons == null || _fixApplyAll == null || _fixRecheck == null) return;
+            if (_fixButtons == null || _fixApplyAll == null || _fixRecheck == null || _fixWhen == null) return;
 
             const int Pad = 34;
             const int Gap = 10;
             const int H = 36;
 
-            int top = (_fixButtons.Height - H) / 2;
-            int x = _fixButtons.Width;
-
+            int wR, wA, wW;
             using (Bitmap bmp = new Bitmap(1, 1))
             using (Graphics g = Graphics.FromImage(bmp))
             {
                 Theme.Quality(g);
-                int wR = (int)Math.Ceiling(Theme.TextW(g, _fixRecheck.Text, Theme.Title)) + Pad + 18;
-                int wA = (int)Math.Ceiling(Theme.TextW(g, _fixApplyAll.Text, Theme.Title)) + Pad + 18;
-
-                _fixRecheck.SetBounds(x - wR, top, wR, H);
-
-                // When there is nothing to apply, Check again takes the margin on its
-                // own rather than leaving the hole where Apply used to be.
-                if (_fixApplyAll.Visible)
-                {
-                    x -= wR + Gap;
-                    _fixApplyAll.SetBounds(x - wA, top, wA, H);
-                }
+                wR = (int)Math.Ceiling(Theme.TextW(g, _fixRecheck.Text, Theme.Title)) + Pad + 18;
+                wA = (int)Math.Ceiling(Theme.TextW(g, _fixApplyAll.Text, Theme.Title)) + Pad + 18;
+                wW = (int)Math.Ceiling(Theme.TextW(g, _fixWhen.Text ?? "", Theme.Small)) + 4;
             }
+
+            // Laid out right to left. When there is nothing to apply, Check again takes the
+            // margin on its own rather than leaving the hole where Apply used to be.
+            int total = wR + (_fixApplyAll.Visible ? Gap + wA : 0) + (wW > 4 ? 14 + wW : 0);
+            int x = total;
+            _fixRecheck.SetBounds(x - wR, 0, wR, H);
+            x -= wR + Gap;
+            if (_fixApplyAll.Visible)
+            {
+                _fixApplyAll.SetBounds(x - wA, 0, wA, H);
+                x -= wA + Gap;
+            }
+            _fixWhen.SetBounds(0, 0, Math.Max(0, wW), H);
+
+            // The row closes the card, under the check list - its top is FitFixCard's to
+            // set, because it follows whatever the list above it grew to.
+            _fixButtons.SetBounds(_fixCard.Width - 20 - total, _fixButtons.Top, total, H);
+
+            // The verdict has the top row to itself.
+            _fixSummary.Width = Math.Max(80, _fixCard.Width - 20 - _fixSummary.Left);
         }
 
-        /// <summary>One suggestion, as a card inside the suggestions panel.</summary>
-        Card BuildFix(Suggestion s, int y)
+        /// <summary>
+        /// One suggestion, as a row of the suggestions card.
+        ///
+        /// A row divided by a rule, not a card inside the card: a box in a box said
+        /// "separate thing" twice over and spent a border, a fill and a radius on saying it.
+        /// </summary>
+        Panel BuildFix(Suggestion s, int y)
         {
             Suggestion local = s;
             int w = _fixList.Width;
-            Card c = new Card {
-                Location = new Point(0, y), Size = new Size(w, 100),
-                Fill = Theme.Inset, Border = Theme.Edge, Radius = 8, BackColor = Theme.Panel,
-                Lift = false          // nested inside a card already; a second highlight is noise
+            Panel c = new Panel {
+                Location = new Point(0, y), Size = new Size(w, 100), BackColor = Theme.Panel,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
+            // left 22px clear for the mark painted below
             Label title = new Label {
-                Text = s.Title, Location = new Point(12, 9), Size = new Size(w - 190, 20),
-                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Inset,
+                Text = s.Title, Location = new Point(22, 14), Size = new Size(w - 60, 22),
+                Font = Theme.Title, ForeColor = Theme.Text, BackColor = Theme.Panel,
                 AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(title);
 
             InfoDot dot = new InfoDot {
-                Location = new Point(w - 28, 10), Heading = s.Title, Body = s.Info,
-                BackColor = Theme.Inset, Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Location = new Point(w - 24, 15), Heading = s.Title, Body = s.Info,
+                BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             c.Controls.Add(dot);
 
             // Measured, not boxed at 32px. The detail is a full sentence explaining what
             // is wrong and what the change costs, and the longer ones ran past it.
-            int detailW = w - 34;
+            int detailW = w - 22 - 40;
             int detailH;
             using (Bitmap bmp = new Bitmap(1, 1))
             using (Graphics mg = Graphics.FromImage(bmp))
@@ -3495,38 +3638,70 @@ namespace PowerDial
             }
 
             Label detail = new Label {
-                Text = s.Detail, Location = new Point(12, 30), Size = new Size(detailW, Math.Max(32, detailH + 2)),
-                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Inset, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                Text = s.Detail, Location = new Point(22, 40), Size = new Size(detailW, Math.Max(18, detailH + 2)),
+                Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             c.Controls.Add(detail);
 
             // The button on the right, against the margin, and the before/after it will
-            // produce on the left of it. Reading order now runs statement, consequence,
-            // then the control that causes it - rather than offering the button first and
-            // putting what it would do at the far end of the row.
+            // produce on the left of it. Reading order runs statement, consequence, then
+            // the control that causes it.
             int rowY = detail.Bottom + 10;
-            c.Height = rowY + 30 + 12;
+            c.Height = rowY + 32 + 16;
 
             int actW = ButtonWidth(s.ActionLabel);
             PillButton act = new PillButton {
-                Text = s.ActionLabel, Location = new Point(w - 14 - actW, rowY), Size = new Size(actW, 30),
-                Primary = s.CanApply, BackColor = Theme.Inset,
+                Text = s.ActionLabel, Location = new Point(w - actW, rowY), Size = new Size(actW, 32),
+                Primary = s.CanApply, BackColor = Theme.Panel,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             PillButton actLocal = act;
             act.Click += (o, e) => ApplyFix(local, actLocal);
             c.Controls.Add(act);
 
-            // the saving, and the before/after, painted rather than laid out so they can
-            // sit hard against whatever is beside them whatever length they are
+            // The anchored button moves on resize, and what is painted beside it has to
+            // follow; a Panel does not repaint itself on resize unless asked.
+            c.Resize += (o, e) => c.Invalidate();
+
+            // the rule, the mark, the saving and the before/after, painted rather than laid
+            // out so they sit hard against whatever is beside them whatever length they are
             c.Paint += (o, e) => {
                 Graphics g = e.Graphics;
                 Theme.Quality(g);
+
+                using (Pen rule = new Pen(Theme.Edge, 1f))
+                    g.DrawLine(rule, 0, 0, c.Width, 0);
+
+                // Amber dot: PowerDial can write this. Hollow ring: Windows has to.
+                if (local.CanApply)
+                    using (SolidBrush b = new SolidBrush(Theme.Spend))
+                        g.FillEllipse(b, 3, 21, 8, 8);
+                else
+                    using (Pen ring = new Pen(Theme.Spend, 1.6f))
+                        g.DrawEllipse(ring, 3, 21, 8, 8);
+
                 if (local.Gain.HasValue && local.Gain.Value > 0.05)
-                    Theme.StrRight(g, "~" + local.Gain.Value.ToString("0.0") + " W", Theme.Value, Theme.Save, c.Width - 34, 6);
-                string change = local.Change;
-                if (change.Length > 0)
-                    Theme.StrRight(g, change, Theme.Small, Theme.Dim, actLocal.Left - 14, actLocal.Top + 8);
+                    Theme.StrRight(g, "~" + local.Gain.Value.ToString("0.0") + " W", Theme.Value, Theme.Save, c.Width - 32, 12);
+
+                // Now in amber, then in green: the app's two accents already mean energy
+                // leaving and energy kept, which is exactly what the two values are.
+                if (local.Kind != FixKind.Advisory)
+                {
+                    const string Arrow = "   →   ";
+                    float right = actLocal.Left - 16;
+                    float ty = actLocal.Top + 8;
+                    float wThen = Theme.TextW(g, local.ThenText, Theme.Small);
+                    float wArrow = Theme.TextW(g, Arrow, Theme.Small);
+                    float wNow = Theme.TextW(g, local.NowText, Theme.Small);
+                    float x0 = right - wThen - wArrow - wNow;
+                    if (x0 > 64)
+                    {
+                        Theme.Str(g, "Now", Theme.Small, Theme.Mute, x0 - Theme.TextW(g, "Now ", Theme.Small), ty);
+                        Theme.Str(g, local.NowText, Theme.Small, Theme.Spend, x0, ty);
+                        Theme.Str(g, Arrow, Theme.Small, Theme.Mute, x0 + wNow, ty);
+                        Theme.Str(g, local.ThenText, Theme.Small, Theme.Save, x0 + wNow + wArrow, ty);
+                    }
+                }
             };
 
             return c;
@@ -3558,6 +3733,7 @@ namespace PowerDial
 
             RunBusy(btn, delegate
             {
+                PauseAutomation("Manual setting change");
                 string err = Advisor.Apply(s);
                 if (err != null) { Log(s.Title + " - failed: " + err); ShowLog(); }
                 else Log(s.Title + " - done (" + s.NowText + " to " + s.ThenText + ")");
@@ -3603,6 +3779,7 @@ namespace PowerDial
         /// </summary>
         void WriteFixes(List<Suggestion> doable, PillButton on)
         {
+            PauseAutomation("Manual setting changes");
             // The only "before" a saving can ever be measured against, taken before anything
             // changes.
             if (_avg.Known)
@@ -3631,6 +3808,7 @@ namespace PowerDial
 
         void ApplyKnob(Row row, int value)
         {
+            PauseAutomation("Manual setting change");
             bool dc = !_acMode;
             string side = dc ? "on battery" : "plugged in";
             string err = PowerCfg.Write(row.Knob, value, dc);
@@ -3667,8 +3845,10 @@ namespace PowerDial
         /// </summary>
         /// <param name="p">the profile</param>
         /// <param name="on">the button to spin while it runs, or null from the tray menu</param>
-        void WriteProfile(Preset p, PillButton on)
+        bool WriteProfile(Preset p, PillButton on, bool automated = false)
         {
+            if (_powerBusy) return false;
+            if (!automated) PauseAutomation("Manual mode selection");
             string label = p.Friendly ?? p.Name;
             Log("Applying " + label + "...");
 
@@ -3682,7 +3862,7 @@ namespace PowerDial
             foreach (KeyValuePair<string, int> kv in p.Values)
             {
                 Knob k = PowerCfg.Find(kv.Key);
-                if (k == null) continue;                 // Windows does not define it here
+                if (k == null || !PowerCfg.Exists(k)) continue;
                 BusyStep();
                 string err = PowerCfg.WriteDc(k, kv.Value);
                 if (err != null) { Log("   could not set " + k.Label + ": " + err); fail++; continue; }
@@ -3701,6 +3881,7 @@ namespace PowerDial
             LoadValues(); RefreshWatch(); RefreshFixes();
             EndBusy();
             RefreshBasic();
+            return fail == 0;
         }
 
         /// <summary>Applied from the tray menu, which has no button of its own to spin.</summary>
@@ -3739,6 +3920,7 @@ namespace PowerDial
                 acLine,
                 "Original settings", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
+            PauseAutomation("Restoring original settings");
 
             // Restore writes both sides of every setting in one call, so there is no
             // per-step hook to hang progress on - the arc spins with no count.

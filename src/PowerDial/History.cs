@@ -24,6 +24,8 @@ namespace PowerDial
         /// One extra small number a minute, and it is what makes "what does each mode
         /// actually cost" answerable from measurement instead of guesswork.</summary>
         public int M { get; set; }
+        public int? E { get; set; }         // remaining mWh; null in older history
+        public string S { get; set; }       // recorded battery segment; changes on AC/gaps/restart
 
         [JsonIgnore]
         public DateTime When { get { return DateTimeOffset.FromUnixTimeSeconds(T).LocalDateTime; } }
@@ -180,7 +182,7 @@ namespace PowerDial
             return list;
         }
 
-        /// <summary>Most recent points, oldest first. Reads at most the last two months.</summary>
+        /// <summary>All retained monthly records, cached oldest first.</summary>
         // Parsed history, kept in memory. Reading it is not cheap - about 5.7 us a point,
         // so at the three-month retention limit a single read is roughly 0.75 s - and the
         // window asks for it several times a poll, plus once per repaint. Re-parsing the
@@ -196,7 +198,7 @@ namespace PowerDial
         public static int Version { get; private set; }
 
         /// <summary>Name, length and last-write of the files we read. Changes on every
-        /// append, so it is enough to know the cache is stale - and it is two stat calls
+        /// append, so it is enough to know the cache is stale - and it is a few stat calls
         /// rather than a parse.</summary>
         static string StampKey(string[] files)
         {
@@ -225,18 +227,36 @@ namespace PowerDial
         /// </summary>
         public static List<HistPoint> All()
         {
-            DateTime utc = DateTime.UtcNow;
-            string[] files = { MonthFile(utc.AddMonths(-1)), MonthFile(utc) };
+            return All(Folder);
+        }
 
+        // Separate folder parameter lets regression tests use isolated history files.
+        internal static List<HistPoint> All(string folder)
+        {
             lock (Gate)
             {
+                List<string> months = new List<string>();
+                try
+                {
+                    if (Directory.Exists(folder))
+                        foreach (string file in Directory.GetFiles(folder, "*.jsonl"))
+                        {
+                            DateTime month;
+                            if (DateTime.TryParseExact(Path.GetFileNameWithoutExtension(file), "yyyy-MM",
+                                CultureInfo.InvariantCulture, DateTimeStyles.None, out month))
+                                months.Add(file);
+                        }
+                }
+                catch { return _cache ?? new List<HistPoint>(); }
+                months.Sort(StringComparer.Ordinal);
+                string[] files = months.ToArray();
                 string key = StampKey(files);
                 if (_cache != null && key == _cacheKey) return _cache;
 
                 List<HistPoint> outp = new List<HistPoint>();
-                try
+                foreach (string f in files)
                 {
-                    foreach (string f in files)
+                    try
                     {
                         if (!File.Exists(f)) continue;
                         foreach (string line in File.ReadAllLines(f))
@@ -250,9 +270,10 @@ namespace PowerDial
                             catch { }
                         }
                     }
+                    catch { } // One unavailable month must not hide the other months.
                 }
-                catch { }
 
+                outp.Sort(delegate (HistPoint a, HistPoint b) { return a.T.CompareTo(b.T); });
                 _cache = outp;
                 _cacheKey = key;
                 Version++;

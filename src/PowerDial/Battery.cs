@@ -35,16 +35,17 @@ namespace PowerDial
 
         readonly List<BatterySample> _samples = new List<BatterySample>();
 
-        // Only the full-charge capacity still comes from WMI, and only until it has been
-        // read once. Everything read on the poll now comes from CallNtPowerInformation -
+        // Full-charge capacity comes from WMI at most once every six hours (and on an
+        // AC transition). Live status comes from CallNtPowerInformation -
         // see ReadPower. Constructing a searcher per poll once cost this app ~4% of a
         // core; reusing one was the first fix, not needing one at all is the real one.
         ManagementObjectSearcher _capacityQ;
+        DateTime _nextCapacityRead = DateTime.MinValue;
+        bool? _capacityOnAc;
 
         /// <summary>
-        /// False once the syscall has answered. WMI is then never touched again on the
-        /// poll path - it is kept only as the fallback for firmware the syscall cannot
-        /// read, and for the full-charge capacity, which is read once and rarely moves.
+        /// WMI status is only a fallback for firmware the syscall cannot read.
+        /// Full-charge capacity has its own infrequent refresh schedule.
         /// </summary>
         bool _useWmiForStatus;
 
@@ -54,6 +55,7 @@ namespace PowerDial
         public bool Charging { get; private set; }
         public int PercentOfFull { get; private set; }
         public string LastError { get; private set; }
+        public bool StatusValid { get; private set; }
 
         /// <summary>Positive = draining, negative = charging. Null until the window fills.</summary>
         public double? Watts { get; private set; }
@@ -103,12 +105,15 @@ namespace PowerDial
         public void Dispose()
         {
             if (_capacityQ != null) { _capacityQ.Dispose(); _capacityQ = null; }
+            if (_statusQ != null) { _statusQ.Dispose(); _statusQ = null; }
             GC.SuppressFinalize(this);
         }
 
         public void Poll()
         {
             LastError = null;
+            StatusValid = false;
+            RemainingMwh = null;
             try
             {
                 // The syscall first, every time, and WMI only where it cannot answer.
@@ -116,8 +121,16 @@ namespace PowerDial
                 // second process and both of them pay - four times a minute, forever,
                 // including while this window is hidden in the tray. The same three
                 // values come out of one kernel call that allocates nothing.
-                if (!_useWmiForStatus && ReadPower()) ReadCapacityOnce();
-                else { _useWmiForStatus = true; ReadWmi(); }
+                if (_useWmiForStatus || !ReadPower()) { _useWmiForStatus = true; ReadWmi(); }
+                if (RemainingMwh.HasValue)
+                {
+                    RefreshCapacity(DateTime.UtcNow, ReadFullChargeCapacity);
+                    if (FullChargeMwh.HasValue && FullChargeMwh.Value > 0)
+                    {
+                        PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / FullChargeMwh.Value);
+                        StatusValid = RemainingMwh.Value >= 0 && PercentOfFull >= 0 && PercentOfFull <= 100;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -212,28 +225,37 @@ namespace PowerDial
         }
 
         /// <summary>
-        /// The full-charge capacity, once. It is what health is measured against and what
-        /// the percentage divides by, and it moves by a few mWh over months - so there is
-        /// nothing to gain from asking WMI for it every fifteen seconds.
+        /// Refresh health's capacity periodically, including after a long sleep. Invalid
+        /// firmware values or failed queries retain the last valid value and retry in five
+        /// minutes, rather than waking WMI on every poll. Both status paths share this.
         /// </summary>
-        void ReadCapacityOnce()
+        internal void RefreshCapacity(DateTime utc, Func<int?> read)
         {
-            if (FullChargeMwh.HasValue && FullChargeMwh.Value > 0) return;
+            bool changed = _capacityOnAc.HasValue && _capacityOnAc.Value != OnAc;
+            _capacityOnAc = OnAc;
+            if (!changed && utc < _nextCapacityRead) return;
+            _nextCapacityRead = utc.AddMinutes(5);
             try
             {
-                if (_capacityQ == null)
-                    _capacityQ = new ManagementObjectSearcher("root\\WMI",
-                        "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity");
-
-                foreach (ManagementObject mo in _capacityQ.Get())
+                int? capacity = read();
+                if (capacity.HasValue && capacity.Value > 0 && capacity.Value < int.MaxValue)
                 {
-                    using (mo) { FullChargeMwh = ToInt(mo["FullChargedCapacity"]); }
-                    break;
+                    FullChargeMwh = capacity;
+                    _nextCapacityRead = utc.AddHours(6);
                 }
-                if (RemainingMwh.HasValue && FullChargeMwh.HasValue && FullChargeMwh.Value > 0)
-                    PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / FullChargeMwh.Value);
+                else LastError = "Full-charge capacity is unavailable; keeping the last valid reading.";
             }
             catch (Exception ex) { LastError = ex.Message; }
+        }
+
+        int? ReadFullChargeCapacity()
+        {
+            if (_capacityQ == null)
+                _capacityQ = new ManagementObjectSearcher("root\\WMI",
+                    "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity");
+            foreach (ManagementObject mo in _capacityQ.Get())
+                using (mo) { return ToInt(mo["FullChargedCapacity"]); }
+            return null;
         }
 
         /// <summary>The original path, kept for firmware the syscall cannot read.</summary>
@@ -242,9 +264,6 @@ namespace PowerDial
             if (_statusQ == null)
                 _statusQ = new ManagementObjectSearcher("root\\WMI",
                     "SELECT RemainingCapacity, PowerOnline, Charging FROM BatteryStatus");
-            if (_capacityQ == null)
-                _capacityQ = new ManagementObjectSearcher("root\\WMI",
-                    "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity");
 
             foreach (ManagementObject mo in _statusQ.Get())
             {
@@ -256,13 +275,6 @@ namespace PowerDial
                 }
                 break;
             }
-            foreach (ManagementObject mo in _capacityQ.Get())
-            {
-                using (mo) { FullChargeMwh = ToInt(mo["FullChargedCapacity"]); }
-                break;
-            }
-            if (RemainingMwh.HasValue && FullChargeMwh.HasValue && FullChargeMwh.Value > 0)
-                PercentOfFull = (int)Math.Round(100.0 * RemainingMwh.Value / FullChargeMwh.Value);
         }
 
         ManagementObjectSearcher _statusQ;

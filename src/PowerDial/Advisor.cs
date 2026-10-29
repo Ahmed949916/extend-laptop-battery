@@ -45,6 +45,28 @@ namespace PowerDial
         }
     }
 
+    /// <summary>How one check came out.</summary>
+    public enum CheckState
+    {
+        Fine,         // read, and already sensible
+        Flagged,      // read, and on the suggestion list
+        NotHere       // nothing to read on this PC - no such setting, no battery, no dGPU
+    }
+
+    /// <summary>
+    /// One thing a scan looked at, with the value it read.
+    ///
+    /// The suggestion list only ever says what is wrong, which is right for a list you act
+    /// on and useless as evidence: an empty list looked exactly like a scan that had not
+    /// run. These are what the empty list stands on - every check, and what it found.
+    /// </summary>
+    public sealed class CheckResult
+    {
+        public string Name;
+        public string Value;        // what was read, in words
+        public CheckState State;
+    }
+
     /// <summary>
     /// Looks at how this PC is set up right now and says what would make the battery last
     /// longer. Read-only: nothing here writes anything until Apply is called.
@@ -72,17 +94,33 @@ namespace PowerDial
 
         public static List<Suggestion> Scan(BatteryMonitor bat, List<ProcInfo> procs, List<Finding> findings)
         {
+            return Scan(bat, procs, findings, null);
+        }
+
+        /// <summary>
+        /// The same scan, also filling <paramref name="checks"/> with every check it ran and
+        /// what each one read - including the ones that found nothing wrong.
+        /// </summary>
+        public static List<Suggestion> Scan(BatteryMonitor bat, List<ProcInfo> procs, List<Finding> findings,
+                                            List<CheckResult> checks)
+        {
             List<Suggestion> list = new List<Suggestion>();
+            if (checks == null) checks = new List<CheckResult>();
+            checks.Clear();
             Machine.Detect(false);
 
-            AddGpuWakers(list, findings);
-            AddBackgroundLoad(list, procs);
+            AddGpuWakers(list, findings, checks);
+            AddBackgroundLoad(list, procs, checks);
 
             // The battery side of a power scheme does nothing on a machine that has no
             // battery. Suggesting those writes on a desktop would be theatre.
             if (Machine.HasBattery)
             {
-                AddPowerSettings(list);
+                AddPowerSettings(list, checks);
+            }
+            else
+            {
+                Note(checks, "Battery-side power settings", "no battery on this PC", CheckState.NotHere);
             }
 
             list.Sort(delegate (Suggestion a, Suggestion b) { return b.Rank.CompareTo(a.Rank); });
@@ -91,10 +129,14 @@ namespace PowerDial
 
         // ------------------------------------------------------------------ checks
 
-        static void AddGpuWakers(List<Suggestion> list, List<Finding> findings)
+        static void AddGpuWakers(List<Suggestion> list, List<Finding> findings, List<CheckResult> checks)
         {
             GpuInfo disc = Machine.Discrete;
-            if (disc == null || !Machine.Hybrid || !Machine.IsPortable) return;
+            if (disc == null || !Machine.Hybrid || !Machine.IsPortable)
+            {
+                Note(checks, "Discrete GPU held awake", "no switchable GPU", CheckState.NotHere);
+                return;
+            }
 
             if (findings == null) findings = GpuWatch.Check();
             int flagged = 0;
@@ -110,7 +152,13 @@ namespace PowerDial
                 int cut = first.IndexOf(" background permission", StringComparison.Ordinal);
                 if (cut > 0) first = first.Substring(0, cut);
             }
-            if (flagged == 0) return;
+            if (flagged == 0)
+            {
+                Note(checks, "Discrete GPU held awake", "nothing found holding it", CheckState.Fine);
+                return;
+            }
+            Note(checks, "Discrete GPU held awake",
+                 flagged + " thing" + (flagged == 1 ? "" : "s") + " can wake it", CheckState.Flagged);
 
             list.Add(new Suggestion {
                 Id = "gpu",
@@ -136,11 +184,18 @@ namespace PowerDial
             });
         }
 
-        static void AddBackgroundLoad(List<Suggestion> list, List<ProcInfo> procs)
+        static void AddBackgroundLoad(List<Suggestion> list, List<ProcInfo> procs, List<CheckResult> checks)
         {
-            if (procs == null || procs.Count == 0) return;
+            if (procs == null || procs.Count == 0)
+            {
+                Note(checks, "Background processes", "not sampled yet", CheckState.NotHere);
+                return;
+            }
             double cpu = ProcessWatch.TotalCpu(procs, true);
-            if (cpu < BackgroundCpuThreshold) return;
+            bool busy = cpu >= BackgroundCpuThreshold;
+            Note(checks, "Background processes", cpu.ToString("0.0") + "% of one core",
+                 busy ? CheckState.Flagged : CheckState.Fine);
+            if (!busy) return;
 
             List<ProcInfo> top = ProcessWatch.TopBy(procs, true, true, 3);
             string names = "";
@@ -173,10 +228,10 @@ namespace PowerDial
         }
 
 
-        static void AddPowerSettings(List<Suggestion> list)
+        static void AddPowerSettings(List<Suggestion> list, List<CheckResult> checks)
         {
             int? epp = Dc("epp");
-            if (epp.HasValue && epp.Value < 70)
+            if (Check(checks, "epp", "Energy performance preference", epp, epp.HasValue && epp.Value < 70))
                 Add(list, "epp", 80, 90,
                     "Raise the energy performance preference to 80%",
                     "It is at " + epp.Value + "%, which tells the CPU to chase clock speed. This is usually " +
@@ -192,7 +247,7 @@ namespace PowerDial
                     "Set it to 80%");
 
             int? boost = Dc("boost");
-            if (boost.HasValue && (boost.Value == 2 || boost.Value == 5))
+            if (Check(checks, "boost", "Turbo boost", boost, boost.HasValue && (boost.Value == 2 || boost.Value == 5)))
                 Add(list, "boost", 4, 70,
                     "Stop turbo boost being aggressive on battery",
                     "It is set to " + Describe("boost", boost) + ", the hungriest of the seven options and a " +
@@ -210,7 +265,7 @@ namespace PowerDial
             if (Machine.Hybrid)
             {
                 int? sw = Dc("switchable");
-                if (sw.HasValue && sw.Value >= 2)
+                if (Check(checks, "switchable", "Graphics preference", sw, sw.HasValue && sw.Value >= 2))
                     Add(list, "switchable", 0, 65,
                         "Steer graphics work to the efficient GPU",
                         "It is set to " + Describe("switchable", sw) + " on battery. Integrated graphics " +
@@ -225,9 +280,13 @@ namespace PowerDial
                         "name still get it.",
                         "Prefer the efficient GPU");
             }
+            else
+            {
+                Note(checks, "Graphics preference", "no switchable GPU", CheckState.NotHere);
+            }
 
             int? cpumin = Dc("cpumin");
-            if (cpumin.HasValue && cpumin.Value > 10)
+            if (Check(checks, "cpumin", "Minimum processor speed", cpumin, cpumin.HasValue && cpumin.Value > 10))
                 Add(list, "cpumin", 5, 50,
                     "Let the CPU idle properly again",
                     "The minimum processor speed is pinned at " + cpumin.Value + "%, so it never fully " +
@@ -242,7 +301,7 @@ namespace PowerDial
                     "Drop it to 5%");
 
             int? sleep = Dc("sleepidle");
-            if (sleep.HasValue && sleep.Value == 0)
+            if (Check(checks, "sleepidle", "Sleep after", sleep, sleep.HasValue && sleep.Value == 0))
                 Add(list, "sleepidle", 900, 48,
                     "Let it sleep when you walk away",
                     "Sleep after is set to never on battery, so an untouched laptop stays awake until the " +
@@ -257,7 +316,7 @@ namespace PowerDial
                     "Sleep after 15 min");
 
             int? lid = Dc("lid");
-            if (lid.HasValue && lid.Value == 0)
+            if (Check(checks, "lid", "Closing the lid", lid, lid.HasValue && lid.Value == 0))
                 Add(list, "lid", 1, 46,
                     "Make closing the lid actually do something",
                     "It is set to do nothing, so the machine keeps running with the screen off. Closed in a " +
@@ -272,7 +331,7 @@ namespace PowerDial
                     "Sleep on close");
 
             int? video = Dc("videoidle");
-            if (video.HasValue && (video.Value == 0 || video.Value > 900))
+            if (Check(checks, "videoidle", "Screen off after", video, video.HasValue && (video.Value == 0 || video.Value > 900)))
                 Add(list, "videoidle", 300, 30,
                     "Turn the screen off sooner when idle",
                     "It is set to " + Describe("videoidle", video) + ". The backlight is one of the largest " +
@@ -286,7 +345,7 @@ namespace PowerDial
                     "Screen off after 5 min");
 
             int? hib = Dc("hibernateidle");
-            if (hib.HasValue && hib.Value == 0)
+            if (Check(checks, "hibernateidle", "Hibernate after", hib, hib.HasValue && hib.Value == 0))
                 Add(list, "hibernateidle", 7200, 25,
                     "Hibernate after a couple of hours asleep",
                     "Hibernate is set to never, so a sleeping machine keeps trickling power indefinitely. " +
@@ -302,7 +361,7 @@ namespace PowerDial
                     "Hibernate after 2 h");
 
             int? pcie = Dc("pcie");
-            if (pcie.HasValue && pcie.Value < 2)
+            if (Check(checks, "pcie", "PCI Express power saving", pcie, pcie.HasValue && pcie.Value < 2))
                 Add(list, "pcie", 2, 20,
                     "Let the PCI Express bus idle down",
                     "It is set to " + Describe("pcie", pcie) + " rather than Maximum. Small, safe, and " +
@@ -325,6 +384,28 @@ namespace PowerDial
             Knob k = PowerCfg.Find(key);
             if (k == null || !PowerCfg.Exists(k)) return null;
             return PowerCfg.Read(k, true);
+        }
+
+        /// <summary>
+        /// Record what one setting read as, and pass through whether it is wrong - so the
+        /// condition that decides the suggestion is the same one that decides the tick.
+        /// </summary>
+        static bool Check(List<CheckResult> checks, string key, string name, int? v, bool wrong)
+        {
+            Knob k = PowerCfg.Find(key);
+            if (k == null || !v.HasValue)
+            {
+                Note(checks, name, "not on this PC", CheckState.NotHere);
+                return false;
+            }
+            Note(checks, name, PowerCfg.Describe(k, v), wrong ? CheckState.Flagged : CheckState.Fine);
+            return wrong;
+        }
+
+        static void Note(List<CheckResult> checks, string name, string value, CheckState state)
+        {
+            if (checks == null) return;
+            checks.Add(new CheckResult { Name = name, Value = value, State = state });
         }
 
         static string Describe(string key, int? v)

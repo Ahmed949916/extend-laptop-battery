@@ -3,12 +3,18 @@ using System.Collections.Generic;
 using System.Threading;
 using PowerDial;
 
-sealed class SelfTest
+sealed partial class SelfTest
 {
     static int fail = 0;
 
-    static void Main()
+    static void Main(string[] args)
     {
+        RegressionChecks();
+        if (Array.IndexOf(args, "--regression-only") >= 0)
+        {
+            Console.WriteLine(fail == 0 ? "=== REGRESSION CHECKS PASSED ===" : "=== REGRESSION CHECKS FAILED ===");
+            Environment.Exit(fail == 0 ? 0 : 1);
+        }
         Console.WriteLine("=== PowerDial self-test (READ-ONLY - changes nothing) ===");
         Console.WriteLine();
 

@@ -108,7 +108,10 @@ so never guard it by hand.
 nothing when the setting is already sensible; a list that always has twelve items is one
 nobody reads. Leave `Gain` null unless you have a figure measured on this PC. Use
 `FixKind.Advisory` when there is no setting to write, which opens the relevant Windows page
-instead of pretending there is a button.
+instead of pretending there is a button. Every check must also record what it read: a setting
+check goes through `Check(...)`, anything else calls `Note(...)` on every path, including the
+fine and not-on-this-PC ones. That list is the card's *What was checked* grid, and it is what
+an empty suggestion list stands on - a check that does not note itself silently vanishes from it.
 
 **A profile** — add a `Preset` to `Presets.cs`: a name, a blurb, and a dictionary of knob
 key to battery-side value. Every key must exist in `PowerCfg`; the selftest checks that.

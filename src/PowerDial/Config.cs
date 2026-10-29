@@ -15,6 +15,8 @@ namespace PowerDial
     public sealed class Config
     {
         public int Version { get; set; }
+        public BatteryToolsOptions BatteryTools { get; set; } = new BatteryToolsOptions();
+        public BatteryToolsState BatteryState { get; set; } = new BatteryToolsState();
 
         /// <summary>Original design capacity in mWh. Null = use whatever Machine detected.</summary>
         public int? DesignCapacityMwh { get; set; }
@@ -70,6 +72,9 @@ namespace PowerDial
                     catch { }
                     if (_current == null) _current = new Config();
                     if (_current.WindowSeconds < 15) _current.WindowSeconds = 60;
+                    if (_current.BatteryTools == null) _current.BatteryTools = new BatteryToolsOptions();
+                    if (_current.BatteryState == null) _current.BatteryState = new BatteryToolsState();
+                    _current.BatteryTools.Normalise();
                     return _current;
                 }
             }
@@ -77,16 +82,24 @@ namespace PowerDial
 
         public static void Save()
         {
+            TrySave();
+        }
+
+        internal static bool TrySave()
+        {
             lock (Gate)
             {
                 try
                 {
                     Config c = Current;
-                    c.Version = 1;
+                    c.Version = 2;
                     Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path));
-                    File.WriteAllText(Path, JsonSerializer.Serialize(c, PrettyJson.Default.Config));
+                    string temporary = Path + ".tmp";
+                    File.WriteAllText(temporary, JsonSerializer.Serialize(c, PrettyJson.Default.Config));
+                    File.Move(temporary, Path, true);
+                    return true;
                 }
-                catch (Exception ex) { Diag.WriteFailed("what has been measured on this PC (config.json)", ex); }
+                catch (Exception ex) { Diag.WriteFailed("what has been measured on this PC (config.json)", ex); return false; }
             }
         }
 

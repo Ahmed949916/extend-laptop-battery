@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -70,6 +70,149 @@ namespace PowerDial
     /// actually changes, and shows what this laptop measured while it was in use - so the
     /// choice is made before the click rather than after it.
     /// </summary>
+    /// <summary>
+    /// Every check the last scan ran, and what each one read.
+    ///
+    /// This is what an empty suggestion list stands on. "Nothing left to suggest" on its
+    /// own was a sentence anyone could print; the same sentence above nine ticks, each
+    /// beside the value actually read off this PC, is a result. It also explains the list
+    /// moving: background load is a live figure, so a suggestion that was there a minute
+    /// ago and is gone now shows its current reading here rather than vanishing without
+    /// a word.
+    ///
+    /// Painted, not built from labels: it is read-only, and nine rows of three controls
+    /// each would be twenty-seven children rebuilt on every scan.
+    /// </summary>
+    public sealed class CheckList : Control
+    {
+        public readonly List<CheckResult> Items = new List<CheckResult>();
+
+        const int HeadH = 34;
+        const int Pitch = 30;
+        const int ColGap = 40;
+        const int TwoColumnsFrom = 640;
+
+        public CheckList()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Panel;
+            TabStop = false;
+            AccessibleRole = AccessibleRole.List;
+        }
+
+        int Columns { get { return Width >= TwoColumnsFrom ? 2 : 1; } }
+
+        /// <summary>Take the height the rows need at the current width.</summary>
+        public void Fit()
+        {
+            int cols = Columns;
+            int rows = (Items.Count + cols - 1) / cols;
+            Height = HeadH + Math.Max(1, rows) * Pitch;
+            Describe();
+            Invalidate();
+        }
+
+        void Describe()
+        {
+            string s = "What was checked. ";
+            foreach (CheckResult c in Items)
+                s += c.Name + ": " + c.Value +
+                     (c.State == CheckState.Flagged ? ", worth changing. " : c.State == CheckState.Fine ? ", fine. " : ". ");
+            AccessibleName = s;
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            // crossing the two-column width changes how many rows there are
+            int cols = Columns;
+            int want = HeadH + Math.Max(1, (Items.Count + cols - 1) / cols) * Pitch;
+            if (Height != want) Height = want;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            Theme.Quality(g);
+            g.Clear(BackColor);
+
+            int fine = 0, flagged = 0, absent = 0;
+            foreach (CheckResult c in Items)
+            {
+                if (c.State == CheckState.Fine) fine++;
+                else if (c.State == CheckState.Flagged) flagged++;
+                else absent++;
+            }
+
+            Theme.Str(g, "What was checked", Theme.Title, Theme.Text, 0, 4);
+            string tally = Items.Count + " checks   ·   " + fine + " fine";
+            if (flagged > 0) tally += "   ·   " + flagged + " to change";
+            if (absent > 0) tally += "   ·   " + absent + " not on this PC";
+            Theme.StrRight(g, tally, Theme.Small, Theme.Mute, Width, 7);
+
+            int cols = Columns;
+            int colW = (Width - ColGap * (cols - 1)) / cols;
+            int rows = (Items.Count + cols - 1) / cols;
+
+            using (Pen rule = new Pen(Theme.Edge, 1f))
+            {
+                // read down the first column, then the second - the order the scan ran in
+                for (int i = 0; i < Items.Count; i++)
+                {
+                    CheckResult c = Items[i];
+                    int col = i / Math.Max(1, rows), row = i % Math.Max(1, rows);
+                    int x = col * (colW + ColGap);
+                    int y = HeadH + row * Pitch;
+
+                    g.DrawLine(rule, x, y, x + colW, y);
+                    Mark(g, c.State, x, y + Pitch / 2);
+
+                    Color vc = c.State == CheckState.Flagged ? Theme.Spend
+                             : c.State == CheckState.Fine ? Theme.Dim : Theme.Mute;
+                    float vw = Math.Min(colW * 0.5f, Theme.TextW(g, c.Value, Theme.Small));
+                    string value = Theme.Fit(g, c.Value, Theme.Small, vw + 1);
+                    Theme.StrRight(g, value, Theme.Small, vc, x + colW, y + 8);
+
+                    float nameW = colW - 24 - vw - 12;
+                    Theme.Str(g, Theme.Fit(g, c.Name, Theme.Body, nameW), Theme.Body,
+                              c.State == CheckState.NotHere ? Theme.Mute : Theme.Text, x + 24, y + 6);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Drawn rather than set in Segoe Fluent Icons, for the reason Theme.Chevron gives:
+        /// that font renders nothing on some installs, and a column of blanks would say the
+        /// opposite of what these marks mean.
+        /// </summary>
+        static void Mark(Graphics g, CheckState state, int x, int cy)
+        {
+            if (state == CheckState.Fine)
+            {
+                using (Pen p = new Pen(Theme.Save, 2f))
+                {
+                    p.StartCap = LineCap.Round; p.EndCap = LineCap.Round; p.LineJoin = LineJoin.Round;
+                    g.DrawLines(p, new PointF[] {
+                        new PointF(x + 2, cy), new PointF(x + 6, cy + 4), new PointF(x + 13, cy - 4) });
+                }
+            }
+            else if (state == CheckState.Flagged)
+            {
+                using (SolidBrush b = new SolidBrush(Theme.Spend))
+                    g.FillEllipse(b, x + 3, cy - 4, 8, 8);
+            }
+            else
+            {
+                using (Pen p = new Pen(Theme.Mute, 2f))
+                {
+                    p.StartCap = LineCap.Round; p.EndCap = LineCap.Round;
+                    g.DrawLine(p, x + 3, cy, x + 11, cy);
+                }
+            }
+        }
+    }
+
     public sealed class ModeCard : Card
     {
         /// <summary>Preset.Code, so the card can be matched to the machine read-back.</summary>
@@ -909,8 +1052,8 @@ namespace PowerDial
 
         public void Describe()
         {
-            if (Rows.Count == 0) { AccessibleName = "Apps using the most power. " + Empty; return; }
-            string s = "Apps using the most power. ";
+            if (Rows.Count == 0) { AccessibleName = "Most CPU-active apps. " + Empty; return; }
+            string s = "Most CPU-active apps. ";
             for (int i = 0; i < Rows.Count; i++)
                 s += Rows[i].Name + " " + Rows[i].Seconds.ToString("0.0") + " seconds. ";
             AccessibleName = s;
@@ -928,9 +1071,9 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
 
-            Theme.Str(g, "Apps using the most power", Theme.Section, Theme.Save, 20, 20);
+            Theme.Str(g, "Most CPU-active apps", Theme.Section, Theme.Save, 20, 20);
             Theme.Str(g, "Processor time used over the last " + Math.Max(1, WindowSeconds) +
-                         " seconds. More time means more drain.",
+                         " seconds. CPU time is not app energy.",
                       Theme.Small, Theme.Mute, 20, 44);
 
             if (Rows.Count == 0)
@@ -1008,9 +1151,9 @@ namespace PowerDial
         public bool Waiting;
 
         public double Before, After;
-        public int Minutes;
+        public int Minutes, BeforeMinutes;
 
-        /// <summary>The plain-language consequence - hours from a full charge, usually.</summary>
+        /// <summary>The observed difference, with estimated runtime explicitly labelled.</summary>
         public string Detail = "";
 
         /// <summary>Shown in place of the figures while Idle or Waiting.</summary>
@@ -1071,7 +1214,12 @@ namespace PowerDial
                     Height = (int)Math.Ceiling(Math.Max(132, 76 + h + 18));
                 }
             }
-            else Height = 178;
+            else
+            {
+                using (Bitmap bmp = new Bitmap(1, 1))
+                using (Graphics g = Graphics.FromImage(bmp))
+                    Height = 174 + (int)Math.Ceiling(Theme.WrapHeight(g, Detail, Theme.Small, Math.Max(120, Width - 40))) + 18;
+            }
 
             Undo.Visible = !Idle;
             Describe();
@@ -1079,10 +1227,10 @@ namespace PowerDial
 
         public void Describe()
         {
-            if (Idle || Waiting) { AccessibleName = "What your last change was worth. " + Message; return; }
-            AccessibleName = "What your last change was worth. Before " +
+            if (Idle || Waiting) { AccessibleName = "Observed before and after. " + Message; return; }
+            AccessibleName = "Observed before and after. Before " +
                              Before.ToString("0.0") + " watts, now " + After.ToString("0.0") +
-                             " watts, measured over " + Minutes + " minutes. " + Detail;
+                             " watts, " + BeforeMinutes + " minutes before and " + Minutes + " since. " + Detail;
         }
 
         protected override void OnSizeChanged(EventArgs e)
@@ -1097,8 +1245,8 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
 
-            Theme.Str(g, "What your last change was worth", Theme.Section, Theme.Save, 20, 20);
-            Theme.Str(g, "Measured on this PC - an average before the change against an average since.",
+            Theme.Str(g, "Observed before and after", Theme.Section, Theme.Save, 20, 20);
+            Theme.Str(g, "Observed averages; workload differences can explain changes in draw.",
                       Theme.Small, Theme.Mute, 20, 44);
 
             if (Idle || Waiting)
@@ -1119,13 +1267,11 @@ namespace PowerDial
                 : (Delta() > 0 ? "-" : "+") + Math.Abs(Delta()).ToString("0.0") + " W";
             Stat(g, x[2], "Difference", d, DeltaColor());
 
-            Theme.Str(g, "measured over " + Minutes + " minutes since", Theme.Small, Theme.Mute, 20, 146);
+            Theme.Str(g, BeforeMinutes + " minutes before / " + Minutes + " minutes since", Theme.Small, Theme.Mute, 20, 146);
 
             if (Detail.Length > 0)
             {
-                float dx = 20 + Theme.TextW(g, "measured over " + Minutes + " minutes since", Theme.Small) + 14;
-                if (dx < Width - 120)
-                    Theme.Str(g, Detail, Theme.Small, DeltaColor(), dx, 146);
+                Theme.Wrap(g, Detail, Theme.Small, Theme.Dim, 20, 174, Math.Max(120, Width - 40));
             }
         }
 
@@ -1205,7 +1351,7 @@ namespace PowerDial
 
         public void Describe()
         {
-            string s = "What each mode has cost you. ";
+            string s = "Observed averages by mode. ";
             if (Rows.Count == 0) s += Empty;
             foreach (Row r in Rows)
                 s += r.Minutes < 5
@@ -1236,8 +1382,8 @@ namespace PowerDial
             Graphics g = e.Graphics;
             Theme.Quality(g);
 
-            Theme.Str(g, "What each mode has cost you", Theme.Section, Theme.Save, 20, 20);
-            Theme.Str(g, "Recorded while you were on battery. A mode you have not used long enough says so.",
+            Theme.Str(g, "Observed averages by mode", Theme.Section, Theme.Save, 20, 20);
+            Theme.Str(g, "Battery usage averages, not proof that a mode saves energy.",
                       Theme.Small, Theme.Mute, 20, 44);
 
             int best = Best(), worst = Worst();
@@ -1290,7 +1436,7 @@ namespace PowerDial
                 y += Pitch;
             }
 
-            string foot = "Cheapest so far: " + Rows[best].Name + ".";
+            string foot = "Lowest observed draw: " + Rows[best].Name + ".";
             if (Recorded.Length > 0) foot += "   ·   " + Recorded;
             Theme.Str(g, foot, Theme.Small, Theme.Mute, 20, Height - 26);
         }
@@ -1411,7 +1557,7 @@ namespace PowerDial
 
             Theme.Str(g, "Compared with your original settings", Theme.Section, Theme.Save, 20, 20);
             Theme.Str(g, "How this laptop was set up before PowerDial, against the mode you are " +
-                         "using now. Both measured here.",
+                         "using now. Observed averages; workloads may differ.",
                       Theme.Small, Theme.Mute, 20, 46);
 
             Theme.Str(g, Verdict.Length > 0 ? Verdict : "Not enough recorded yet",

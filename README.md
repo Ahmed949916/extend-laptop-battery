@@ -30,6 +30,32 @@ raises the window that already exists rather than starting another.
 
 ## Pages
 
+**Battery tools** contains low-charge alerts (20% by default), optional charge-target
+reminders (80%), and sustained high-drain alerts. Alerts can be snoozed for an hour.
+High-drain detection needs at least 20 prior battery records, excludes the latest ten
+minutes from its baseline, waits five continuous minutes, and has a 30-minute cooldown.
+Windows notification settings may suppress the popup; the Activity log still records it.
+
+Battery-percentage automation is **off until enabled**. The default rule applies Battery
+saver at or below 25%, once per discharge crossing, and re-arms on AC or above 30%.
+Choose Max battery, Battery saver or Balanced and a threshold from 5–50%. Manual setting
+changes pause automation for one hour. Pause, Resume / retry and Undo are on Battery tools.
+Undo restores only captured battery-side values still matching the automatic change; it
+preserves subsequent manual edits and refuses to write to a different power plan. Failed
+applications are logged and do not retry every poll. Automation runs only while PowerDial
+is running; it does not install a service or enable startup automatically.
+
+**Recent battery sessions** on Insights shows the latest six recorded unplugged segments:
+duration, starting/ending percentage, measured energy where available, average draw,
+modes and busiest sampled app. Sleep gaps, AC and app restarts split segments. Mode
+changes stay within a segment. Older history has no remaining-energy counter, so its
+energy is shown as unavailable. These are recording summaries, not full-charge tests.
+
+Background overhead is reduced: hidden/minimized windows do not rebuild charts and
+comparison cards every minute, the countdown timer stops when it is not needed, and
+process sampling runs every minute except on the visible activity pages. Opening the
+window refreshes the charts. Battery monitoring retains its 15-second cadence.
+
 Comparison figures are **observed averages**, not proof that a setting caused a saving.
 Insights has an optional **Similar CPU sessions** filter shared with the Overview
 comparison. It matches the latest qualifying session in the current mode against sessions

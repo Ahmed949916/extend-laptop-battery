@@ -47,6 +47,7 @@ namespace PowerDial
             };
             _toolsCard.Undo.Click += (s, e) => UndoAutomaticChange();
             _root.Controls.Add(_toolsCard);
+            _root.Controls.SetChildIndex(_toolsCard, _root.Controls.GetChildIndex(_bottomPad));
             RefreshBatteryTools();
         }
 
@@ -137,13 +138,13 @@ namespace PowerDial
             { Log("Battery automation: " + preset.Friendly + " is already active."); return; }
             // Capture all readable DC values before touching anything. Nothing is written
             // if a supported setting cannot be read, or if the undo record cannot be saved.
-            AutomaticChange change = new AutomaticChange { Scheme = PowerCfg.ActiveScheme() };
+            AutomaticChange change = new AutomaticChange { Scheme = PowerCfg.ActiveSchemeForWrite() };
             if (!Guid.TryParse(change.Scheme, out _)) { NotifyBattery("Automation skipped: active power scheme could not be read."); return; }
             foreach (KeyValuePair<string, int> value in preset.Values)
             {
                 Knob knob = PowerCfg.Find(value.Key);
                 if (knob == null || !PowerCfg.Exists(knob)) continue;
-                int? before = PowerCfg.Read(knob, true);
+                int? before = PowerCfg.ReadInScheme(knob, true, change.Scheme);
                 if (!before.HasValue) { NotifyBattery("Automation skipped: could not read " + knob.Label + "."); return; }
                 if (before.Value == value.Value) continue;
                 change.Before[value.Key] = before.Value;
@@ -163,7 +164,7 @@ namespace PowerDial
             BatteryToolsState state = Config.Current.BatteryState;
             AutomaticChange change = state.Undo;
             if (change == null || change.Before == null || change.Applied == null) return;
-            if (!string.Equals(PowerCfg.ActiveScheme(), change.Scheme, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(PowerCfg.ActiveSchemeForWrite(), change.Scheme, StringComparison.OrdinalIgnoreCase))
             { NotifyBattery("Undo skipped: the active power scheme has changed. Select the earlier scheme first."); return; }
             PauseAutomation("Undoing automatic settings");
             int failed = 0, restored = 0, skipped = 0;
@@ -173,11 +174,11 @@ namespace PowerDial
                     Knob knob = PowerCfg.Find(old.Key);
                     int applied;
                     if (knob == null || !change.Applied.TryGetValue(old.Key, out applied)) { skipped++; continue; }
-                    int? current = PowerCfg.Read(knob, true);
+                    int? current = PowerCfg.ReadInScheme(knob, true, change.Scheme);
                     if (!current.HasValue) { failed++; continue; }
                     if (current.Value != applied) { skipped++; continue; } // Preserve later manual edits.
-                    string error = PowerCfg.WriteDc(knob, old.Value);
-                    if (error != null || PowerCfg.Read(knob, true) != old.Value) { failed++; Log("Undo failed: " + knob.Label + " " + error); }
+                    string error = PowerCfg.WriteAutomaticDc(knob, applied, old.Value, change.Scheme);
+                    if (error != null) { failed++; Log("Undo failed: " + knob.Label + " " + error); }
                     else restored++;
                 }
                 ResetDrawWindow(); LoadValues(); RefreshWatch(); RefreshFixes();

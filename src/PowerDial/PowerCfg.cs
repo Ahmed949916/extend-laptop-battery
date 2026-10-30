@@ -243,8 +243,12 @@ namespace PowerDial
         /// <summary>Current value, or null when there is no stored value and no default.</summary>
         public static int? Read(Knob knob, bool onBattery)
         {
+            return ReadInScheme(knob, onBattery, ActiveScheme());
+        }
+
+        internal static int? ReadInScheme(Knob knob, bool onBattery, string scheme)
+        {
             string valueName = onBattery ? "DCSettingIndex" : "ACSettingIndex";
-            string scheme = ActiveScheme();
 
             int? v = ReadDword(SchemesRoot + "\\" + scheme + "\\" + knob.SubGroup + "\\" + knob.Guid, valueName);
             if (v.HasValue) return v;
@@ -283,6 +287,34 @@ namespace PowerDial
         public static string WriteDc(Knob knob, int value)
         {
             return Write(knob, value, true);
+        }
+
+        // Automatic writes must not use the cached scheme or silently fall back to
+        // Balanced if the active scheme cannot be read.
+        internal static string ActiveSchemeForWrite()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(SchemesRoot))
+                {
+                    string scheme = key == null ? null : key.GetValue("ActivePowerScheme") as string;
+                    return Guid.TryParse(scheme, out _) ? scheme : null;
+                }
+            }
+            catch { return null; }
+        }
+
+        internal static string WriteAutomaticDc(Knob knob, int expected, int value, string scheme)
+        {
+            return AutomationWrites.Guarded(scheme, expected, value, ActiveSchemeForWrite,
+                () => ReadInScheme(knob, true, scheme), delegate (int target) {
+                    string error = RunChecked("powercfg", "/setdcvalueindex " + scheme + " " +
+                        knob.SubGroup + " " + knob.Guid + " " + target);
+                    if (error != null) return error;
+                    if (!string.Equals(ActiveSchemeForWrite(), scheme, StringComparison.OrdinalIgnoreCase))
+                        return "Power scheme changed; the captured scheme was updated but not activated.";
+                    return RunChecked("powercfg", "/setactive " + scheme);
+                });
         }
 
         /// <summary>

@@ -14,6 +14,7 @@ namespace PowerDial
 
         internal BatteryToolsCard(BatteryToolsOptions options)
         {
+            Width = 648;
             Height = 570;
             AddText("Smart alerts", 20, 16, Theme.Section, 32);
             Check(Low, "Low-battery reminder", 62, options.LowAlert);
@@ -28,7 +29,7 @@ namespace PowerDial
             AddText("Battery-percentage automation", 20, 297, Theme.Section, 30);
             Check(Auto, "Automatically switch on battery", 340, options.AutoEnabled);
             Percent(AutoAt, 5, 50, options.AutoPercent, 338, "Automation battery percentage");
-            AddText("Apply this mode", 20, 390, Theme.Body, 30);
+            AddText("Apply this mode", 20, 390, Theme.Body, 30, 290);
             Mode.SetBounds(335, 382, 270, 32);
             Mode.Items.Add("Max battery"); Mode.Items.Add("Battery saver"); Mode.Items.Add("Balanced");
             Mode.SelectedIndex = options.AutoMode - 1;
@@ -61,11 +62,11 @@ namespace PowerDial
             options.Normalise();
         }
 
-        void AddText(string text, int x, int y, Font font, int height)
+        void AddText(string text, int x, int y, Font font, int height, int width = 608)
         {
-            Label label = new Label { Text = text, Location = new Point(x, y), Size = new Size(608, height),
+            Label label = new Label { Text = text, Location = new Point(x, y), Size = new Size(width, height),
                 Font = font, ForeColor = Theme.Text, BackColor = Theme.Panel,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | (width == 608 ? AnchorStyles.Right : AnchorStyles.None) };
             Controls.Add(label);
         }
 

@@ -3177,6 +3177,7 @@ namespace PowerDial
             _window.Clear();
             _windowStart = DateTime.UtcNow;
             if (_readout != null) _readout.MeasuringLeft = _bat.WindowSeconds;
+            UpdateCountdownTimer();
         }
 
         void PushSample()
@@ -3184,7 +3185,6 @@ namespace PowerDial
             if (!_bat.OnAc && _bat.Watts.HasValue && _bat.Watts.Value > 0)
             {
                 _spark.Push(_bat.Watts.Value);
-                _chartWatts.Push(_bat.Watts.Value);
             }
         }
 
@@ -3863,10 +3863,14 @@ namespace PowerDial
             {
                 Knob k = PowerCfg.Find(kv.Key);
                 if (k == null || !PowerCfg.Exists(k)) continue;
+                AutomaticChange automatic = automated ? Config.Current.BatteryState.Undo : null;
+                if (automated && (automatic == null || !automatic.Before.ContainsKey(kv.Key))) continue;
                 BusyStep();
-                string err = PowerCfg.WriteDc(k, kv.Value);
+                string err = automated
+                    ? PowerCfg.WriteAutomaticDc(k, automatic.Before[kv.Key], kv.Value, automatic.Scheme)
+                    : PowerCfg.WriteDc(k, kv.Value);
                 if (err != null) { Log("   could not set " + k.Label + ": " + err); fail++; continue; }
-                int? back = PowerCfg.Read(k, true);
+                int? back = automated ? PowerCfg.ReadInScheme(k, true, automatic.Scheme) : PowerCfg.Read(k, true);
                 if (back.HasValue && back.Value == kv.Value) { Log("   " + k.Label + " -> " + PowerCfg.Describe(k, kv.Value)); ok++; }
                 else { Log("   " + k.Label + " did not stick"); fail++; }
             }

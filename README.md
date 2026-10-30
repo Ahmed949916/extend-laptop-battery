@@ -1,8 +1,8 @@
 # PowerDial
 
 A tray app for controlling the power settings that actually affect battery life, with
-presets, per-setting explanations, a live watts readout, process telemetry, and a one-click
-way back to how things were.
+presets, per-setting explanations, a live watts readout, process telemetry, smart alerts,
+optional battery-percentage automation, and a one-click way back to how things were.
 
 It runs on **any Windows 10 or 11 PC** - gaming laptop, ultrabook or desktop - and adapts
 to what it finds. Nothing about the hardware is assumed: the battery, the GPUs, which
@@ -14,10 +14,12 @@ On a desktop the battery panels stand down and the rest carries on.
 
 ![Overview](docs/overview.png)
 
-*Overview. Every number on it was measured on the machine it is running on - the charge and
-health from the battery itself, the draw timed from its energy counter, the processor time
-sampled per process. The two settings worth changing are named, with one button that
-changes them.*
+*Overview. Charge, health, measured draw, the active power mode, and the most CPU-active
+apps. Recommendations reflect what the app found on this PC. Runtime is estimated from
+measured usage; comparisons show observed averages and identify workload differences.*
+
+Screenshots were refreshed from the running app on **30 October 2026**, on battery,
+at 1920 × 1032. Readings and recommendations reflect that machine at capture time.
 
 ## Run it
 
@@ -70,12 +72,12 @@ remains separately identified in Diagnostics. History reads all retained monthly
 and battery full-charge capacity refreshes every six hours and on AC transitions; failed
 reads keep the last valid capacity and retry after five minutes.
 
-A sidebar down the left, six entries, nothing hidden behind a mode. The app opens on
+A sidebar down the left, seven entries, nothing hidden behind a mode. The app opens on
 **Overview** every time rather than restoring whichever page you closed on.
 
 **Overview** - the one screen that answers "is anything wrong, and what should I do".
 The battery stated once; the single most worthwhile change with a button that makes it;
-what your current settings are worth against the ones this laptop started with; the mode in
+observed draw compared with the settings this laptop started with; the mode in
 effect; and what is keeping the processor busy.
 
 ![Power modes](docs/power-modes.png)
@@ -95,20 +97,24 @@ and Insights possible at all.
 
 ![Insights](docs/insights.png)
 
-*Insights. The comparison at the top is two measured averages, not a projection - and when
-the change made things worse it says so, including the likeliest reason. The ranking below
-scales every bar against the thirstiest mode, colours only the cheapest and the dearest,
-and states the span the recording covers.*
+*Insights. Observed before/after averages, recorded minutes behind each mode, and an
+optional Similar CPU sessions filter. Workload differences can explain the results;
+runtime differences are explicitly labeled as estimates.*
 
-**Insights** - what your last change was worth, in watts and in hours per charge; what each
-mode has cost, ranked, with the span the recording covers; the draw and charge charts; the
-apps using the most power; and the cumulative per-process tally across every session.
+**Insights** - observed averages before and after the last change; averages by mode and
+the span the recording covers; recent battery sessions; draw and charge charts; live CPU
+and memory activity; and the cumulative per-process CPU tally across sessions.
+
+![Recent battery sessions](docs/battery-sessions.png)
+
+*Recent battery sessions. Recorded unplugged segments show charge change, duration,
+energy where measured, average draw, modes, and the busiest sampled app. Sleep gaps and
+restarts split segments. Older records without an energy counter say Energy unavailable.*
 
 ![Advanced](docs/advanced.png)
 
-*Advanced. Every setting carries an info icon explaining what it does, what it costs, and
-which of its numbers were measured rather than assumed. Four of the ten are ones Windows
-hides from its own Power Options.*
+*Advanced. Recommendations include a What was checked list and the scan time. Individual
+power controls below explain their effects and distinguish battery from plugged-in values.*
 
 **Advanced** - every individual power setting with what it does and what it costs, plus the
 full list of what is worth changing.
@@ -123,6 +129,16 @@ it.*
 the one honest thing there is to say about wear: nothing in this app or in Windows gives
 back capacity that is already gone.
 
+![Battery tools](docs/battery-tools.png)
+
+*Battery tools. Low-charge and sustained high-drain alerts, an optional charge-target
+reminder, and configurable battery-percentage automation. Automation starts disabled;
+Pause, Resume / retry, and Undo automatic change keep it under the user's control.*
+
+**Battery tools** - set alert thresholds, snooze notifications, choose an automatic mode
+and percentage, and manage automatic changes. Charge-target reminders notify the user;
+they do not stop charging. PowerDial must be running for alerts and automation to work.
+
 ![Diagnostics](docs/diagnostics.png)
 
 *Diagnostics. Both sections stay collapsed because on most machines the answer is "nothing
@@ -132,8 +148,9 @@ activity log, nothing has failed.*
 **Diagnostics** - the GPU watch, the activity log, and **Run as admin** for the few settings
 that need it.
 
-Every figure on every page is measured on your machine. Nothing is predicted, and where
-there is not enough recorded yet it says so instead of guessing.
+Power readings come from this machine. Runtime estimates use its recorded draw and
+battery capacity. Missing measurements stay unavailable, and mode comparisons describe
+observations rather than proving that a setting caused a saving.
 
 ## Layout
 
@@ -239,12 +256,11 @@ battery's own energy counter over a 60-second window. That means:
 *Battery saver* / *Balanced* / *Performance*. All of them write the **on-battery side
 only**; a profile never touches plugged-in behaviour.
 
-Which one is cheapest is not a question this file can answer, and it deliberately does not
-try - an earlier version of it quoted a figure from one tuning session that the app's own
-recording now contradicts. *What each mode has cost you* on Insights is the answer, measured
-on your machine, and it can be surprising: *Performance* often beats *Balanced* outright,
-because boost finishing a burst quickly returns the CPU to idle sooner, and idle is where
-the savings are. That is the whole reason the app measures instead of asserting.
+**Observed averages by mode** on Insights shows what each mode drew during recorded use.
+Different workloads can change the ranking, so it does not establish which mode will save
+energy for the same task. Use Similar CPU sessions to narrow the comparison; GPU and display
+activity may still differ. Even disabling boost is a tradeoff: a task may take longer to
+finish, so a lower draw does not necessarily mean less total energy.
 
 **Original settings.** A fifth profile, and the way back. It is how this laptop was set up
 before PowerDial wrote anything: the snapshot is taken on first run, before the UI is
@@ -286,12 +302,11 @@ restarts rather than starting from nothing each launch:
 - *Running now* - a live sample of every process, grouped by name, with instance counts and
   a bar proportional to whichever column you sort on. Toggle memory / CPU, and filter to
   background only.
-- *Since recording began* - the cumulative tally. Which process has actually burned the
-  most CPU across every session, which is the one costing you runtime. This is the view
-  that named `OneDrive.Sync.Service` as the top consumer here.
-- *What your last change was worth* - the average measured before the change against the
-  average measured since, in watts and in hours per charge.
-- *What each mode has cost you* - every profile ranked by what it actually drew here, with
+- *Since recording began* - cumulative sampled CPU activity across sessions. It identifies
+  processes to investigate, without assigning energy usage to individual apps.
+- *Observed before and after* - recorded averages before and since a change, in watts,
+  with estimated runtime differences and a reminder that workloads can explain them.
+- *Observed averages by mode* - every profile ranked by what it actually drew here, with
   the recorded minutes behind each and the span they were gathered over.
 
 **Battery health**, on its own page: how much charge the pack still holds against what it
@@ -303,8 +318,9 @@ implying a setting somewhere could undo wear.
 *Background* means no instance of that process owns a visible window. Those are the ones
 worth questioning, because you are not the one using them.
 
-Recorded to `%LOCALAPPDATA%\PowerDial\history` at about 150 bytes a minute, roughly 6 MB
-for a month of continuous use, pruned after three months.
+Recorded once a minute to `%LOCALAPPDATA%\PowerDial\history`, pruned by month after three
+months. New records include the remaining-energy counter and a recording-segment ID;
+file size depends on the sampled process names. All retained monthly files are read.
 
 There are deliberately **no modelled analytics**. An earlier version drew predicted
 runtime-versus-brightness curves from three hardcoded workload constants; it was removed
@@ -355,9 +371,10 @@ disagrees, the activity log says so and shows what it actually reads.
 **Elevation is `asInvoker`, deliberately.** Most of what this writes (EPP and the rest)
 succeeds unelevated, so demanding a UAC prompt at every launch would be gratuitous. Anything that does need admin reports it and offers **Run as admin**.
 
-**Nothing is written just by running it.** Launching the app leaves every registry value
-untouched until a control is used. This is a design rule the restore point depends on, not
-something the selftest checks — verify it by hand if you change startup.
+**Automation is opt-in.** A fresh install leaves power settings alone until a control is
+used. Once battery-percentage automation is enabled, it can apply the configured mode
+while the app runs, including after a later launch. The original settings snapshot is
+captured before the app can make that change.
 
 ## Interface
 
@@ -372,8 +389,8 @@ section is one click from every other. The current entry carries a bar and a hea
 as well as a colour, so "you are here" never rests on colour alone.
 
 **Three accents, each meaning one thing.** *Amber is energy leaving* - draw figures, the
-thirstiest mode's bar, the capacity a worn pack has lost. *Green is energy kept* - a
-measured saving, the mode in use, the cheapest mode recorded. *Yellow says where you are* -
+highest observed mode average, the capacity a worn pack has lost. *Green marks lower
+observed draw and the mode in use*. *Yellow says where you are* -
 the page title and the current sidebar entry, and nothing else. Green was doing double duty
 as "selected" until the yellow arrived, which spent an accent that should only ever mean a
 saving.

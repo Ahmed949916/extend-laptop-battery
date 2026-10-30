@@ -7,7 +7,7 @@
     screen, so the shots are consistently sized and carry no desktop around them.
 
     It cannot drive the app, so it prompts: switch PowerDial to the page it names, press
-    Enter, and it captures that page. Six prompts, about a minute.
+    Enter, and it captures that page. Eight prompts, including a scrolled Insights view.
 
     Window bounds come from DwmGetWindowAttribute rather than GetWindowRect. On Windows 10
     and 11 a window's real rectangle includes several pixels of invisible resize border,
@@ -105,8 +105,10 @@ $pages = @(
     @{ File = 'overview.png';    Page = 'Overview' }
     @{ File = 'power-modes.png'; Page = 'Power modes' }
     @{ File = 'insights.png';    Page = 'Insights' }
+    @{ File = 'battery-sessions.png'; Page = 'Insights, then scroll until Recent battery sessions is fully visible' }
     @{ File = 'advanced.png';    Page = 'Advanced' }
     @{ File = 'battery-health.png'; Page = 'Battery health' }
+    @{ File = 'battery-tools.png'; Page = 'Battery tools' }
     @{ File = 'diagnostics.png'; Page = 'Diagnostics' }
 )
 

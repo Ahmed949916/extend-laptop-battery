@@ -211,8 +211,7 @@ namespace PowerDial
                 Kind = FixKind.Advisory,
                 Rank = 40,
                 Title = "Background processes are using " + cpu.ToString("0.0") + "% of one core",
-                Detail = (names.Length > 0 ? "Worst right now: " + names + ". " : "") +
-                         "Nothing with a window is doing this - it is all running behind your back.",
+                Detail = names.Length > 0 ? "Top background CPU: " + names + "." : "Background CPU use is above the recommended threshold.",
                 Info = "This counts every process that has no visible window, which is the work you are " +
                        "not choosing to do. A CPU that never gets to idle is a CPU drawing power all the " +
                        "time, and it is the one thing on this list that no power setting can fix.\n\n" +

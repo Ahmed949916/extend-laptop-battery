@@ -1620,7 +1620,7 @@ namespace PowerDial
 
             _adviceFix = null;
             _cardAdvice.Detail.Text = "Show me the detail";
-            _cardAdvice.FooterText = "Every power setting PowerDial can change is already set for long battery life.";
+            _cardAdvice.FooterText = "Battery power settings are already optimised.";
 
             if (fixable > 0)
             {
@@ -1645,8 +1645,7 @@ namespace PowerDial
                 _cardAdvice.Warn = true;
                 _cardAdvice.Title = advisory.Title;
                 _cardAdvice.Body = advisory.Detail;
-                _cardAdvice.Note = "PowerDial cannot change this for you - Windows decides which " +
-                                   "apps may run in the background.";
+                _cardAdvice.Note = "Opens Windows settings; no automatic changes.";
                 _cardAdvice.AllSet = true;
                 _cardAdvice.Act.Text = advisory.ActionLabel;
                 _cardAdvice.Act.Glyph = null;
@@ -2645,10 +2644,8 @@ namespace PowerDial
             _sideDc.Selected = !ac; _sideDc.Invalidate();
             _sideAc.Selected = ac;  _sideAc.Invalidate();
             _sideNote.Text = ac
-                ? "Editing the plugged-in side. Battery values are untouched, and nothing here changes "
-                  + "your runtime - on mains there is no drain to measure against."
-                : "Editing the battery side. This is what the profiles, the suggestions and the "
-                  + "restore point write.";
+                ? "Changes apply while plugged in."
+                : "Changes apply on battery.";
             _sideNote.ForeColor = ac ? Theme.Spend : Theme.Dim;
             LoadValues();
             Log(ac ? "Switched to editing the plugged-in side."
@@ -3566,22 +3563,21 @@ namespace PowerDial
                 if (Machine.HasBattery)
                 {
                     _fixSummary.Text = "Nothing left to change";
-                    _fixSub.Text = "Every check below is already set for long battery life. " +
-                                   "It runs again after any change you make here.";
+                    _fixSub.Text = "All available checks passed.";
                 }
                 else
                 {
                     _fixSummary.Text = "No battery, so there is no runtime to extend";
-                    _fixSub.Text = "Battery-side settings do nothing on this PC. The checks that still apply are below.";
+                    _fixSub.Text = "Showing checks available on this PC.";
                 }
             }
             else
             {
                 _fixSummary.ForeColor = Theme.Spend;
                 _fixSummary.Text = _fixes.Count + " thing" + (_fixes.Count == 1 ? "" : "s") + " worth changing";
-                string sub = "Most important first. Each button writes the battery side only and reads it back to confirm.";
+                string sub = "Most important first. Changes apply on battery.";
                 if (applicable == 0)
-                    sub = "None of these is a setting PowerDial can write - each button opens the Windows page where you change it.";
+                    sub = "Review these apps in Windows settings.";
                 else if (advisory > 0)
                     sub = applicable + " can be applied from here; " + advisory +
                           (advisory == 1 ? " needs" : " need") + " changing in Windows. Most important first.";

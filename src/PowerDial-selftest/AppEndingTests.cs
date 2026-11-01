@@ -10,6 +10,12 @@ sealed partial class SelfTest
     {
         const string path = "C:\\Apps\\chrome.exe", user = "S-1-5-21-test", windows = "C:\\Windows";
         Check("supported user apps may pass eligibility checks", AppEnding.Eligible(path, user, user, 1, 1, false, false, windows));
+        foreach (string app in new string[] { "Signal", "WhatsApp.Root", "GoogleDriveFS", "obs64", "vivaldi", "EADesktop" })
+        {
+            Check(app + " is supported", AppEnding.Eligible("C:\\Apps\\" + app + ".exe", user, user, 1, 1, false, false, windows));
+            Check(app + " remains excluded when elevated", !AppEnding.Eligible("C:\\Apps\\" + app + ".exe", user, user, 1, 1, true, false, windows));
+        }
+        Check("friendly names distinguish apps from executables", AppEnding.DisplayName("obs64") == "OBS Studio" && AppEnding.DisplayName("WhatsApp.Root") == "WhatsApp");
         Check("unknown applications are excluded", !AppEnding.Eligible("C:\\Apps\\unknown.exe", user, user, 1, 1, false, false, windows));
         Check("Windows executables are excluded even with a supported name", !AppEnding.Eligible("C:\\WINDOWS\\chrome.exe", user, user, 1, 1, false, false, windows));
         Check("other users are excluded", !AppEnding.Eligible(path, user, "someone-else", 1, 1, false, false, windows));

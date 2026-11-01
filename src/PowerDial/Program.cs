@@ -70,7 +70,7 @@ namespace PowerDial
                 Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
                 try
                 {
-                    Application.Run(new MainForm());
+                    StartupScreen.Run();
                 }
                 catch (Exception ex)
                 {

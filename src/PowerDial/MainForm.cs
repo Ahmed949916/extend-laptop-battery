@@ -62,6 +62,9 @@ namespace PowerDial
         Suggestion _adviceFix;      // what the Overview primary button acts on, if anything
 
         NavRail _nav;               // the sidebar - the app's one navigation model
+        Picker _compactNav;
+        readonly string[] _pageKeys = { "overview", "modes", "insights", "advanced", "health", "tools", "diagnostics" };
+        static readonly string[] PageLabels = { "Overview", "Power modes", "Insights", "Advanced", "Battery health", "Battery tools", "Diagnostics" };
         PillButton _background;     // sidebar footer action: put the window away
         StatusBlock _status;        // battery summary pinned to the foot of the sidebar
         string _page = "overview";  // which section is on screen
@@ -159,7 +162,9 @@ namespace PowerDial
         volatile bool _quitting;
         bool _saidWhereItWent;
 
-        public MainForm()
+        public MainForm() : this(null) { }
+
+        internal MainForm(Action<string, int> startup)
         {
             Text = "PowerDial";
             BackColor = Theme.Ink;
@@ -173,11 +178,12 @@ namespace PowerDial
             // Theme.cs handle the text; this is what scales the control bounds around it.
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(980, 900);
-            MinimumSize = new Size(W + Rail + 34, 560);
+            MinimumSize = new Size(480, 480);
             Icon = MakeIcon();
             DoubleBuffered = true;
 
             Machine.Detect(false);
+            if (startup != null) startup("Reading power settings", 1);
 
             // Before BuildUi, not after. The restore point is what the Default profile is
             // built from, and BuildUi builds the mode cards - so capturing afterwards meant
@@ -191,6 +197,7 @@ namespace PowerDial
             // reach the switch that would make those values no longer original
             string acCap = Baseline.BackfillAcIfMissing();
 
+            if (startup != null) startup("Preparing your dashboard", 2);
             BuildUi();
             BuildTray();
 
@@ -282,6 +289,7 @@ namespace PowerDial
                 }
             };
 
+            if (startup != null) startup("Checking battery and app activity", 3);
             int pruned = History.Prune();
             _bat.Poll();
             _procs = _procWatch.Sample();
@@ -297,6 +305,7 @@ namespace PowerDial
             // seconds later - the data is already here.
             RefreshBasic();
             RefreshOverview();
+            if (startup != null) startup("Ready", 4);
             _drainRecords.AddRange(History.Recent(1500));
             _drainBaseline = BatteryToolsPolicy.Baseline(_drainRecords, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             if (pruned > 0) Log("Cleared " + pruned + " history file(s) older than " + History.KeepMonths + " months.");
@@ -1321,6 +1330,13 @@ namespace PowerDial
 
             Controls.Add(_nav);
             _nav.BringToFront();
+            _compactNav = new Picker { AccessibleName = "Page", Visible = false };
+            _compactNav.Items.AddRange(PageLabels);
+            _compactNav.SelectedIndex = 0;
+            _compactNav.SelectedIndexChanged += (s, e) => {
+                if (_compactNav.SelectedIndex >= 0) SetPage(_pageKeys[_compactNav.SelectedIndex]);
+            };
+            Controls.Add(_compactNav);
         }
 
         /// <summary>
@@ -2443,11 +2459,15 @@ namespace PowerDial
 
             // Everything to the right of the sidebar is the page, so the column measures
             // against what is left of the window rather than the whole of it.
-            int avail = ClientSize.Width - Rail - Chrome - 6 - SystemInformation.VerticalScrollBarWidth;
+            bool compact = ClientSize.Width < W + Rail + 34;
+            int rail = compact ? 0 : Rail;
+            int top = compact ? 52 : 0;
+            int avail = ClientSize.Width - rail - Chrome - 6 - SystemInformation.VerticalScrollBarWidth;
             int w = Math.Max(W, Math.Min(WMax, avail));
 
             if (_nav != null)
             {
+                _nav.Visible = !compact;
                 _nav.Height = ClientSize.Height;
                 if (_status != null)
                     _status.Location = new Point(0, Math.Max(200, _nav.Height - _status.Height));
@@ -2455,11 +2475,19 @@ namespace PowerDial
                     _background.Location = new Point(12, _status.Top - _background.Height - 12);
             }
 
-            _chrome.Location = new Point(Rail, 0);
-            _chrome.Width = Math.Max(80, ClientSize.Width - Rail);
-            _root.Location = new Point(Rail, _chrome.Height);
-            _root.Size = new Size(Math.Max(80, ClientSize.Width - Rail),
-                                  Math.Max(80, ClientSize.Height - _chrome.Height));
+            if (_compactNav != null)
+            {
+                _compactNav.Visible = compact;
+                _compactNav.SetBounds(14, 10, Math.Max(100, ClientSize.Width - 28), 34);
+                int selected = Array.IndexOf(_pageKeys, _page);
+                if (_compactNav.SelectedIndex != selected) _compactNav.SelectedIndex = selected;
+                _compactNav.BringToFront();
+            }
+            _chrome.Location = new Point(rail, top);
+            _chrome.Width = Math.Max(80, ClientSize.Width - rail);
+            _root.Location = new Point(rail, _chrome.Height + top);
+            _root.Size = new Size(Math.Max(80, ClientSize.Width - rail),
+                                  Math.Max(80, ClientSize.Height - _chrome.Height - top));
 
             // centre the column when the window is wider than the column is allowed to be
             int extra = Math.Max(0, avail - w);

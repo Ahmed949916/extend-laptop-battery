@@ -10,9 +10,7 @@ namespace PowerDial
             try
             {
                 // An explicit review takes a fresh snapshot; no new work on the background poll.
-                using (AppEndingDialog dialog = new AppEndingDialog(delegate {
-                    _procs = _procWatch.Sample(); return _procs;
-                }))
+                using (AppEndingDialog dialog = new AppEndingDialog(() => new ProcessWatch().Sample()))
                 {
                     dialog.Completed += Log;
                     dialog.ShowDialog(this);

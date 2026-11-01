@@ -24,7 +24,8 @@ namespace PowerDial
             _sample = sample;
             Text = "Manage background apps";
             BackColor = Theme.Ink; ForeColor = Theme.Text; Font = Theme.Body;
-            ClientSize = new Size(820, 710); MinimumSize = new Size(760, Height);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            ClientSize = new Size(820, 710); MinimumSize = new Size(560, 680);
             MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
             KeyPreview = true;
             TextAt(this, "Manage background apps", 24, 22, 772, 38, Theme.Page, Theme.Lead);
@@ -77,10 +78,12 @@ namespace PowerDial
             AddAction(_refresh); AddAction(_done); AddAction(_end);
             _refresh.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             _apps.SelectedIndexChanged += (s, e) => SelectionChanged();
-            _refresh.Click += (s, e) => Reload();
+            _refresh.Click += async (s, e) => await ReloadAsync();
             _done.Click += (s, e) => { if (_confirming) CancelConfirmation(); else Close(); };
             _end.Click += async (s, e) => await ReviewOrEndAsync();
-            Reload();
+            _apps.Enabled = false; _end.Enabled = false;
+            _appName.Text = "Finding background apps…";
+            Shown += async (s, e) => await ReloadAsync();
         }
 
         void AddAction(PillButton button)
@@ -102,22 +105,27 @@ namespace PowerDial
             parent.Controls.Add(label);
         }
 
-        void Reload()
+        async Task ReloadAsync()
         {
-            if (_busy) return;
+            if (_busy || _loading) return;
+            string selected = _review != null && _apps.SelectedIndex >= 0 ? _review.Groups[_apps.SelectedIndex].Name : null;
             _loading = true;
+            _apps.Enabled = false; _end.Enabled = false; _refresh.Enabled = false; _refresh.Busy = true;
+            _status.Text = "Checking app ownership and protected processes…";
             try
             {
+                AppEnding next = await Task.Run(() => new AppEnding(_sample()));
+                if (IsDisposed) { next.Dispose(); return; }
                 _apps.SelectedIndex = -1; _apps.Items.Clear(); _processes.Rows.Clear();
                 if (_review != null) _review.Dispose();
-                _review = new AppEnding(_sample());
+                _review = next;
                 foreach (AppEndGroup group in _review.Groups)
                     _apps.Items.Add(group.DisplayName + " · " + group.Targets.Count + " processes");
                 _used = false; _confirming = false; _end.Destructive = false;
                 _apps.Enabled = _review.Groups.Count > 0; _end.Enabled = _apps.Enabled; _refresh.Enabled = true;
-                _done.Text = "Close";
+                _done.Text = "Close"; _refresh.Text = "Refresh apps";
                 _status.Text = _review.Problem ?? "Only recognised apps from your session. System and protected processes are excluded.";
-                if (_apps.Enabled) _apps.SelectedIndex = 0;
+                if (_apps.Enabled) _apps.SelectedIndex = Math.Max(0, _review.Groups.FindIndex(g => g.Name == selected));
                 else
                 {
                     _appName.Text = "No eligible background apps"; _appInfo.Text = "Refresh to check again, or close this review.";
@@ -130,7 +138,11 @@ namespace PowerDial
                 _apps.Enabled = false; _end.Enabled = false;
                 _appName.Text = "App review unavailable"; _appInfo.Text = "Refresh to try again."; _count.Text = "";
             }
-            finally { _loading = false; SelectionChanged(); }
+            finally
+            {
+                _loading = false;
+                if (!IsDisposed) { _refresh.Busy = false; _refresh.Enabled = true; SelectionChanged(); }
+            }
         }
 
         void SelectionChanged()
@@ -156,10 +168,10 @@ namespace PowerDial
         void LayoutActions()
         {
             int y = ClientSize.Height - 56;
-            _refresh.Visible = !_confirming; _refresh.SetBounds(24, y, 156, 36);
-            _done.SetBounds(ClientSize.Width - (_confirming ? 174 : 370), y, _confirming ? 150 : 110, 36);
+            _refresh.Visible = !_confirming; _refresh.SetBounds(24, y, 180, 36);
+            _done.SetBounds(ClientSize.Width - (_confirming ? 174 : 310), y, _confirming ? 150 : 90, 36);
             // Move the final action away from the initial button to prevent double-click confirmation.
-            _end.SetBounds(_confirming ? 24 : ClientSize.Width - 244, y, 220, 36);
+            _end.SetBounds(_confirming ? 24 : ClientSize.Width - 204, y, 180, 36);
         }
 
         void CancelConfirmation()
@@ -171,7 +183,7 @@ namespace PowerDial
 
         async Task ReviewOrEndAsync()
         {
-            if (_busy || _used || _apps.SelectedIndex < 0) return;
+            if (_busy || _loading || _used || _apps.SelectedIndex < 0) return;
             AppEndGroup group = _review.Groups[_apps.SelectedIndex];
             if (!_confirming)
             {
@@ -198,7 +210,8 @@ namespace PowerDial
                 _busy = false; _used = true; _confirming = false; _end.Busy = false; _end.Destructive = false;
                 _end.Text = "End app…"; _done.Text = "Close"; _done.Enabled = true; _refresh.Enabled = true;
                 _noticeTitle.Text = "Review complete";
-                _notice.Text = "Refresh apps for a new review before ending another app. Apps may restart themselves.";
+                _apps.Enabled = false; _refresh.Text = "Review another";
+                _notice.Text = "Choose Review another to check the remaining apps. Apps may restart themselves.";
                 LayoutActions();
             }
         }

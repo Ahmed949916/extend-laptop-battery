@@ -28,7 +28,11 @@ namespace PowerDial
     {
         static readonly HashSet<string> Supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
             "chrome", "msedge", "firefox", "brave", "opera", "Discord", "slack", "Spotify", "Zoom",
-            "Teams", "ms-teams", "Telegram", "WhatsApp", "Dropbox", "OneDrive", "steam", "EpicGamesLauncher"
+            "Teams", "ms-teams", "Telegram", "WhatsApp", "WhatsApp.Root", "Dropbox", "OneDrive", "steam", "EpicGamesLauncher",
+            "vivaldi", "waterfox", "librewolf", "thunderbird", "Signal", "Viber", "DiscordCanary", "DiscordPTB",
+            "Amazon Music", "AppleMusic", "iTunes", "vlc", "foobar2000", "Plex", "TIDAL",
+            "Battle.net", "EADesktop", "UbisoftConnect", "GalaxyClient", "GOG Galaxy", "qBittorrent",
+            "GoogleDriveFS", "MEGAsync", "pCloud", "obs64", "ShareX"
         };
         internal readonly List<AppEndGroup> Groups = new List<AppEndGroup>();
         internal string Problem;
@@ -50,7 +54,32 @@ namespace PowerDial
                 case "zoom": return "Zoom";
                 case "teams": case "ms-teams": return "Microsoft Teams";
                 case "telegram": return "Telegram";
-                case "whatsapp": return "WhatsApp";
+                case "whatsapp": case "whatsapp.root": return "WhatsApp";
+                case "vivaldi": return "Vivaldi";
+                case "waterfox": return "Waterfox";
+                case "librewolf": return "LibreWolf";
+                case "thunderbird": return "Mozilla Thunderbird";
+                case "signal": return "Signal";
+                case "viber": return "Viber";
+                case "discordcanary": return "Discord Canary";
+                case "discordptb": return "Discord PTB";
+                case "amazon music": return "Amazon Music";
+                case "applemusic": return "Apple Music";
+                case "itunes": return "iTunes";
+                case "vlc": return "VLC media player";
+                case "foobar2000": return "foobar2000";
+                case "plex": return "Plex";
+                case "tidal": return "TIDAL";
+                case "battle.net": return "Battle.net";
+                case "eadesktop": return "EA app";
+                case "ubisoftconnect": return "Ubisoft Connect";
+                case "galaxyclient": case "gog galaxy": return "GOG Galaxy";
+                case "qbittorrent": return "qBittorrent";
+                case "googledrivefs": return "Google Drive";
+                case "megasync": return "MEGA";
+                case "pcloud": return "pCloud";
+                case "obs64": return "OBS Studio";
+                case "sharex": return "ShareX";
                 case "dropbox": return "Dropbox";
                 case "onedrive": return "Microsoft OneDrive";
                 case "steam": return "Steam";
@@ -79,7 +108,7 @@ namespace PowerDial
                         }
                     if (group.Targets.Count == 0) Groups.Remove(group);
                 }
-                Groups.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
+                Groups.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.DisplayName, b.DisplayName));
             }
             catch (Exception ex) { Problem = "App checks could not be completed: " + ex.Message; Dispose(); Groups.Clear(); }
         }

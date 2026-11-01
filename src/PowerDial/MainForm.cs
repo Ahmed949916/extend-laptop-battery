@@ -96,6 +96,8 @@ namespace PowerDial
         List<Suggestion> _fixes = new List<Suggestion>();
         List<Finding> _findings;
         bool _fixesSeeded;
+        bool _fixRowsBuilt, _busyRootDisabled, _refreshCommitWasEnabled;
+        RefreshInputGate _refreshGate;
         LineChart _chartWatts;
 
         // How far back both charts look. History is one point a minute, so these are
@@ -481,7 +483,7 @@ namespace PowerDial
                 Size = new Size(140, 36), BackColor = Theme.Panel
             };
             _fixRecheck.Click += (s, e) => RunBusy(_fixRecheck, delegate {
-                LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); });
+                LoadValues(); RefreshWatch(); RefreshFixes(); Log("Re-checked what is worth changing."); }, true);
             _fixButtons.Controls.Add(_fixRecheck);
             _fixCard.Controls.Add(_fixButtons);
             _fixCard.SizeChanged += (s, e) => LayOutFixButtons();
@@ -841,14 +843,14 @@ namespace PowerDial
             // from each label's own measured width, on one baseline.
             PillButton recheck = new PillButton { Text = "Check again", Icon = ButtonIcon.Refresh };
             recheck.Click += (s, e) => RunBusy(recheck, delegate {
-                RefreshWatch(); Log("Re-checked what could be waking the GPU."); });
+                RefreshWatch(); Log("Re-checked what could be waking the GPU."); }, true);
 
             PillButton opensettings = new PillButton { Text = "Open Windows settings", Icon = ButtonIcon.External };
             opensettings.Click += (s, e) => GpuWatch.OpenBackgroundAppsSettings();
 
             PillButton reread = new PillButton { Text = "Re-read everything" };
             reread.Click += (s, e) => RunBusy(reread, delegate {
-                LoadValues(); RefreshWatch(); Log("Re-read every setting from the registry."); });
+                LoadValues(); RefreshWatch(); Log("Re-read every setting from the registry."); }, true);
 
             LayOutRow(_watchButtons, 3, recheck, opensettings, reread);
             _watchCard.Controls.Add(_watchButtons);
@@ -1208,32 +1210,27 @@ namespace PowerDial
             {
                 case "modes":
                     _pageTitle.Title = "Power modes";
-                    _pageTitle.Subtitle = "Each one changes how hard the processor works and how " +
-                                          "quickly the screen sleeps. These apply on battery only.";
+                    _pageTitle.Subtitle = "Power profiles for battery use.";
                     break;
                 case "insights":
                     _pageTitle.Title = "Insights";
-                    _pageTitle.Subtitle = "Observed usage comparisons and what this laptop has " +
-                                          "actually drawn. Recorded once a minute, kept on disk.";
+                    _pageTitle.Subtitle = "Recorded power use, app activity and battery sessions.";
                     break;
                 case "health":
                     _pageTitle.Title = "Battery health";
-                    _pageTitle.Subtitle = "How much charge this battery still holds compared with " +
-                                          "when it was new. Read from the hardware.";
+                    _pageTitle.Subtitle = "Capacity, charge habits and battery care.";
                     break;
                 case "tools":
                     _pageTitle.Title = "Battery tools";
-                    _pageTitle.Subtitle = "Smart reminders and optional automatic power modes. Runs while PowerDial is open or in the tray.";
+                    _pageTitle.Subtitle = "Charge reminders and optional power-mode automation.";
                     break;
                 case "advanced":
                     _pageTitle.Title = "Advanced";
-                    _pageTitle.Subtitle = "Individual Windows power settings, and everything this app " +
-                                          "found worth changing.";
+                    _pageTitle.Subtitle = "Recommendations and individual power settings.";
                     break;
                 case "diagnostics":
                     _pageTitle.Title = "Diagnostics";
-                    _pageTitle.Subtitle = "Detail for troubleshooting. Nothing here needs your " +
-                                          "attention day to day.";
+                    _pageTitle.Subtitle = "GPU checks and activity log.";
                     break;
                 default:
                     _pageTitle.Title = "Overview";
@@ -1393,7 +1390,7 @@ namespace PowerDial
             // that one. No scroll needed: it is the first thing on the page.
             _cardAdvice.Detail.Click += (s, e) => SetPage("advanced");
             _cardAdvice.Recheck.Click += (s, e) => RunBusy(_cardAdvice.Recheck, delegate {
-                LoadValues(); RefreshWatch(); RefreshFixes(); });
+                LoadValues(); RefreshWatch(); RefreshFixes(); }, true);
             _cardMode.Change.Click += (s, e) => SetPage("modes");
             _cardApps.ManageApps.Click += (s, e) => ManageBackgroundApps();
             // Diagnostics has the GPU watch and the log; neither is a list of apps. The
@@ -1659,7 +1656,7 @@ namespace PowerDial
             {
                 _cardAdvice.Warn = false;
                 _cardAdvice.Title = "Power settings optimised";
-                _cardAdvice.Body = "No recommended changes from the latest power check.";
+                _cardAdvice.Body = "";
                 _cardAdvice.PassedChecks = 0;
                 _cardAdvice.UnavailableChecks = 0;
                 _cardAdvice.GraphicsResult = "Not checked";
@@ -1720,8 +1717,8 @@ namespace PowerDial
             }
             _cardApps.WindowSeconds = _bat.WindowSeconds;
             _cardApps.Empty = _bat.OnAc
-                ? "Nothing timed yet - processor time is only recorded on battery."
-                : "Collecting: the first window takes " + _bat.WindowSeconds + " seconds.";
+                ? "App timing resumes on battery."
+                : "Collecting a " + _bat.WindowSeconds + " s sample…";
             _cardApps.Describe();
             _cardApps.Invalidate();
         }
@@ -2331,11 +2328,10 @@ namespace PowerDial
         /// list of writes the count rides beside it, so a profile still says how far along
         /// it is rather than becoming an indefinite spinner.
         ///
-        /// The column is disabled either way - queuing clicks onto a half-written scheme is
-        /// how you end up with settings nobody asked for. A disabled parent does not stop
-        /// the button painting itself, and the timer keeps ticking through DoEvents.
+        /// Writes disable the column. Read-only refreshes retain the controls' appearance
+        /// and briefly gate input, so a scan never flashes every button into a disabled state.
         /// </summary>
-        void BeginBusy(PillButton on, int steps)
+        void BeginBusy(PillButton on, int steps, bool readOnly = false)
         {
             _powerBusy = true;
             _poll.Stop();
@@ -2346,7 +2342,14 @@ namespace PowerDial
                 _busyBtn.Busy = true;
                 _busyBtn.BusyText = steps > 0 ? "0/" + steps : null;
             }
-            _root.Enabled = false;          // no queuing clicks onto a half-written scheme
+            _busyRootDisabled = !readOnly;
+            if (_busyRootDisabled) _root.Enabled = false;
+            else
+            {
+                _refreshGate = new RefreshInputGate(this);
+                _refreshCommitWasEnabled = _commit.Enabled;
+                _commit.Stop();
+            }
             Application.DoEvents();
         }
 
@@ -2361,20 +2364,38 @@ namespace PowerDial
         /// <summary>Spin <paramref name="b"/> for the length of one blocking call. Every
         /// button that shells out to powercfg or re-probes the GPU goes through here, so
         /// none of them can look ignored while the window is frozen.</summary>
-        void RunBusy(PillButton b, MethodInvoker work)
+        void RunBusy(PillButton b, MethodInvoker work, bool readOnly = false)
         {
-            BeginBusy(b, 0);
-            try { work(); }
-            finally { EndBusy(); }
+            if (_powerBusy) return;
+            BeginBusy(b, 0, readOnly);
+            if (readOnly) _root.SuspendLayout();
+            try
+            {
+                work();
+                if (readOnly && _page == "overview") RefreshOverview();
+            }
+            finally
+            {
+                try { if (readOnly) _root.ResumeLayout(true); }
+                finally { EndBusy(); }
+            }
         }
 
         void EndBusy()
         {
+            // Flush queued clicks while the refresh input guard is still installed.
+            if (_refreshGate != null) Application.DoEvents();
             // RefreshFixes rebuilds the suggestion cards, so the button that started this
             // may already have been disposed by the time the work finishes.
             if (_busyBtn != null && !_busyBtn.IsDisposed) { _busyBtn.Busy = false; _busyBtn.Invalidate(); }
             _busyBtn = null;
-            _root.Enabled = true;
+            if (_busyRootDisabled) { _root.Enabled = true; _busyRootDisabled = false; }
+            if (_refreshGate != null)
+            {
+                _refreshGate.Dispose(); _refreshGate = null;
+                if (_refreshCommitWasEnabled && _pendingRow != null) _commit.Start();
+                _refreshCommitWasEnabled = false;
+            }
             _busyTotal = 0; _busyDone = 0;
             _powerBusy = false;
             if (!_quitting) _poll.Start();
@@ -2396,6 +2417,7 @@ namespace PowerDial
                 if (_poll != null) { _poll.Stop(); _poll.Dispose(); }
                 if (_commit != null) { _commit.Stop(); _commit.Dispose(); }
                 if (_tick != null) { _tick.Stop(); _tick.Dispose(); }
+                if (_refreshGate != null) { _refreshGate.Dispose(); _refreshGate = null; }
 
                 // Hide before disposing or the icon can outlive the process in the tray
                 // until something makes the shell re-enumerate it.
@@ -3421,36 +3443,43 @@ namespace PowerDial
 
         void RefreshWatch()
         {
-            _watchList.Controls.Clear();
             List<Finding> f = GpuWatch.Check();
+            bool changed = !RefreshState.SameFindings(_findings, f);
             _findings = f;          // the advisor reuses these rather than re-enumerating
-            int y = 0;
-            foreach (Finding item in f)
+            if (changed)
             {
-                Finding local = item;
-                Panel line = new Panel {
-                    Location = new Point(0, y), Size = new Size(_watchList.Width, 22),
-                    BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-                };
-                line.Paint += (s, e) => {
-                    Graphics g = e.Graphics;
-                    Theme.Quality(g);
-                    g.Clear(Theme.Panel);
-                    Color c = local.Informational ? Theme.Dim : (local.Ok ? Theme.Save : Theme.Alert);
-                    string glyph = local.Informational ? "-" : (local.Ok ? Theme.GlyphCheck : Theme.GlyphWarn);
-                    Theme.Str(g, glyph, local.Informational ? Theme.Small : Theme.IconSmall, c, 0, 3);
-                    Theme.Str(g, local.Name, Theme.Body, local.Ok ? Theme.Text : Theme.Alert, 22, 2);
-                    Color dc = local.Ok ? Theme.Dim : Theme.Alert;
-                    if (local.Informational) dc = Theme.Dim;
-                    Theme.StrRight(g, local.Detail, Theme.Small, dc, line.Width, 3);
-                };
-                _watchList.Controls.Add(line);
-                y += 22;
-            }
+                List<Control> old = new List<Control>();
+                foreach (Control control in _watchList.Controls) old.Add(control);
+                _watchList.Controls.Clear();
+                foreach (Control control in old) control.Dispose();
+                int y = 0;
+                foreach (Finding item in f)
+                {
+                    Finding local = item;
+                    Panel line = new Panel {
+                        Location = new Point(0, y), Size = new Size(_watchList.Width, 22),
+                        BackColor = Theme.Panel, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                    };
+                    line.Paint += (s, e) => {
+                        Graphics g = e.Graphics;
+                        Theme.Quality(g);
+                        g.Clear(Theme.Panel);
+                        Color c = local.Informational ? Theme.Dim : (local.Ok ? Theme.Save : Theme.Alert);
+                        string glyph = local.Informational ? "-" : (local.Ok ? Theme.GlyphCheck : Theme.GlyphWarn);
+                        Theme.Str(g, glyph, local.Informational ? Theme.Small : Theme.IconSmall, c, 0, 3);
+                        Theme.Str(g, local.Name, Theme.Body, local.Ok ? Theme.Text : Theme.Alert, 22, 2);
+                        Color dc = local.Ok ? Theme.Dim : Theme.Alert;
+                        if (local.Informational) dc = Theme.Dim;
+                        Theme.StrRight(g, local.Detail, Theme.Small, dc, line.Width, 3);
+                    };
+                    _watchList.Controls.Add(line);
+                    y += 22;
+                }
 
-            _watchList.Height = Math.Max(22, y);
-            _watchButtons.Top = _watchList.Bottom + 8;
-            _watchCard.Height = _watchButtons.Bottom + 12;
+                _watchList.Height = Math.Max(22, y);
+                _watchButtons.Top = _watchList.Bottom + 8;
+                _watchCard.Height = _watchButtons.Bottom + 12;
+            }
 
             int flagged = 0;
             foreach (Finding fi in f) if (!fi.Ok) flagged++;
@@ -3486,35 +3515,40 @@ namespace PowerDial
         /// </summary>
         void RefreshFixes()
         {
-            // Rows are disposed, not just dropped: Controls.Clear leaves every old row and
-            // its button, label and info dot alive with their handles, once per scan. Later
-            // rather than now, because the scan is often running inside the Click of a
-            // button on one of those rows, which still has its own mouse-up to finish.
-            List<Control> old = new List<Control>();
-            foreach (Control c in _fixList.Controls) old.Add(c);
-            _fixList.Controls.Clear();
-            if (old.Count > 0)
+            List<Suggestion> scanned = Advisor.Scan(_bat, _procs, _findings, _fixChecks.Items);
+            bool changed = !_fixRowsBuilt || !RefreshState.SameSuggestions(_fixes, scanned);
+            _fixes = scanned;
+            if (changed)
             {
-                if (IsHandleCreated)
-                    BeginInvoke((Action)delegate { foreach (Control c in old) c.Dispose(); });
-                else
-                    foreach (Control c in old) c.Dispose();
+                _fixRowsBuilt = true;
+                // Rows are disposed, not just dropped: Controls.Clear leaves every old row and
+                // its button, label and info dot alive with their handles, once per scan. Later
+                // rather than now, because the scan is often running inside the Click of a
+                // button on one of those rows, which still has its own mouse-up to finish.
+                List<Control> old = new List<Control>();
+                foreach (Control c in _fixList.Controls) old.Add(c);
+                _fixList.Controls.Clear();
+                if (old.Count > 0)
+                {
+                    if (IsHandleCreated)
+                        BeginInvoke((Action)delegate { foreach (Control c in old) c.Dispose(); });
+                    else
+                        foreach (Control c in old) c.Dispose();
+                }
+
+                int y = 0;
+                foreach (Suggestion s in _fixes)
+                {
+                    // Height comes back from the row rather than being assumed: the detail
+                    // sentence wraps to two lines on most of these and three on a few.
+                    Panel built = BuildFix(s, y);
+                    _fixList.Controls.Add(built);
+                    y += built.Height;
+                }
+
+                _fixList.Height = Math.Max(1, y);
+                _fixList.Visible = _fixes.Count > 0;
             }
-
-            _fixes = Advisor.Scan(_bat, _procs, _findings, _fixChecks.Items);
-
-            int y = 0;
-            foreach (Suggestion s in _fixes)
-            {
-                // Height comes back from the row rather than being assumed: the detail
-                // sentence wraps to two lines on most of these and three on a few.
-                Panel built = BuildFix(s, y);
-                _fixList.Controls.Add(built);
-                y += built.Height;
-            }
-
-            _fixList.Height = Math.Max(1, y);
-            _fixList.Visible = _fixes.Count > 0;
 
             int applicable = 0;
             foreach (Suggestion s in _fixes) if (s.CanApply) applicable++;

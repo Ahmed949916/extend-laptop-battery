@@ -28,7 +28,7 @@ namespace PowerDial
             MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
             KeyPreview = true;
             TextAt(this, "Manage background apps", 24, 22, 772, 38, Theme.Page, Theme.Lead);
-            TextAt(this, "Review an app's processes before choosing to end it.", 24, 68, 772, 26, Theme.Body, Theme.Dim);
+            TextAt(this, "Review processes before ending an app.", 24, 68, 772, 26, Theme.Body, Theme.Dim);
             TextAt(this, "Choose a background app", 24, 106, 772, 22, Theme.Small, Theme.Dim);
             _apps.SetBounds(24, 132, 772, 34); _apps.Anchor |= AnchorStyles.Right;
             _apps.AccessibleName = "Background app to review"; Controls.Add(_apps);
@@ -116,7 +116,7 @@ namespace PowerDial
                 _used = false; _confirming = false; _end.Destructive = false;
                 _apps.Enabled = _review.Groups.Count > 0; _end.Enabled = _apps.Enabled; _refresh.Enabled = true;
                 _done.Text = "Close";
-                _status.Text = _review.Problem ?? "Windows, services, critical and elevated processes are excluded. Only recognised apps in your Windows session are offered.";
+                _status.Text = _review.Problem ?? "Only recognised apps from your session. System and protected processes are excluded.";
                 if (_apps.Enabled) _apps.SelectedIndex = 0;
                 else
                 {
@@ -140,7 +140,7 @@ namespace PowerDial
             if (index >= 0 && _review != null && index < _review.Groups.Count)
             {
                 AppEndGroup group = _review.Groups[index];
-                _appName.Text = group.DisplayName; _appInfo.Text = group.Name + ".exe · your Windows session";
+                _appName.Text = group.DisplayName; _appInfo.Text = group.Name + ".exe";
                 _count.Text = group.Targets.Count + (group.Targets.Count == 1 ? " process" : " processes");
                 _processes.Rows.Clear();
                 foreach (AppEndTarget target in group.Targets)
@@ -148,7 +148,7 @@ namespace PowerDial
                 _processes.ClearSelection();
             }
             _noticeTitle.Text = "Save your work first";
-            _notice.Text = "Ending an app stops every listed process. Unsaved work, downloads, calls or syncing may be interrupted. Some apps restart automatically.";
+            _notice.Text = "Ending stops all listed processes. Unsaved work may be lost; downloads, calls or syncing may stop.";
             _end.Enabled = !_used && !_busy && _apps.Enabled && index >= 0;
             LayoutActions();
         }

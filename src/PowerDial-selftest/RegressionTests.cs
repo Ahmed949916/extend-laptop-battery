@@ -14,6 +14,7 @@ sealed partial class SelfTest
         BatteryToolsChecks();
         BatteryCareChecks();
         AppEndingChecks();
+        RefreshChecks();
     }
 
     static void HistoryChecks()

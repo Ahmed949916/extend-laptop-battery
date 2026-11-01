@@ -32,6 +32,11 @@ raises the window that already exists rather than starting another.
 
 ## Pages
 
+**Check again** keeps the UI's enabled appearance stable during read-only refreshes.
+Only the initiating button shows progress. Re-entrant input is briefly gated, layout
+updates are batched, and unchanged suggestion/GPU rows are retained. The scan timestamp
+and Overview results update immediately. Power-setting writes retain their controls lock.
+
 **Manage background apps** is available on the Overview app card and on Insights. Both
 open the same guarded review before ending anything.
 It offers only a conservative list of recognised browsers, messaging, media, sync and

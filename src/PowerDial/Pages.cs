@@ -467,10 +467,10 @@ namespace PowerDial
 
             string left = OnAc ? "Paused" : (HoursLeft.HasValue ? Hm(HoursLeft.Value) : "Measuring");
             noteH = Math.Max(noteH, Figure(g, x, "Time left", left, OnAc
-                ? "Readings pause while the laptop is charging."
+                ? ""
                 : (HoursLeft.HasValue
-                    ? "Estimated from your measured usage. It moves as your workload changes."
-                    : "Needs a few recorded minutes on battery before it can say."), Theme.Text, col));
+                    ? "Estimate from recorded use."
+                    : "Needs a battery-use sample."), Theme.Text, col));
 
             // "16 s" in the place a wattage goes reads as the answer to "how much am I
             // using" - so the figure stays a dash until there is one, and the countdown
@@ -483,12 +483,12 @@ namespace PowerDial
             // Paused.
             string draw = OnAc ? "--" : (Watts.HasValue ? Watts.Value.ToString("0.0") + " W" : "--");
             string drawNote = OnAc
-                ? "Nothing to measure on mains - draw is timed from the battery itself."
+                ? "Measured on battery."
                 : (Watts.HasValue
-                    ? "Averaged over the last minute, measured on this laptop."
+                    ? "Last-minute average."
                     : (MeasuringLeft > 0
-                        ? "Measuring: the first reading lands in " + MeasuringLeft + " seconds."
-                        : "Measuring how much power this laptop draws."));
+                        ? "First reading in " + MeasuringLeft + " s."
+                        : "Measuring power draw…"));
             noteH = Math.Max(noteH, Figure(g, x + col, "Using now", draw, drawNote,
                    (!OnAc && Watts.HasValue) ? Theme.Text : Theme.Dim, col));
 
@@ -498,7 +498,7 @@ namespace PowerDial
                 string hv = Health.Value.ToString("0") + "%";
                 float fx = x + col * 2;
                 noteH = Math.Max(noteH, Figure(g, fx, "Battery health", hv,
-                       "Holds " + hv + " of the charge it did when new.",
+                       "Of original capacity.",
                        ageing ? Theme.Spend : Theme.Save, col));
 
                 // A word as well as the colour: "amber" is not a status anyone can hear.
@@ -524,7 +524,7 @@ namespace PowerDial
             else
             {
                 noteH = Math.Max(noteH, Figure(g, x + col * 2, "Battery health", "Unknown",
-                       "Windows does not report a reliable original capacity for this pack.",
+                       "Original capacity unavailable.",
                        Theme.Dim, col));
             }
 
@@ -683,8 +683,8 @@ namespace PowerDial
                 {
                     float titleH = TextHeight(g, Title, Theme.Head, Width - 280);
                     float bodyH = TextHeight(g, Body, Theme.Body, Width - 112);
-                    _successResultsY = (int)Math.Ceiling(Math.Max(80, 24 + titleH + 8 + bodyH)) + 18;
-                    _successActionsY = _successResultsY + 108;
+                    _successResultsY = (int)Math.Ceiling(Math.Max(72, 24 + titleH + 8 + bodyH)) + 16;
+                    _successActionsY = _successResultsY + (UnavailableChecks > 0 ? 80 : 64) + 24;
                     PlaceButtons(_successActionsY);
                     Height = _successActionsY + Recheck.Height + 20;
                     return;
@@ -817,13 +817,11 @@ namespace PowerDial
             float titleH = Theme.Wrap(g, Title, Theme.Head, Theme.Text, 88, 24, Math.Max(80, Width - 280));
             Theme.Wrap(g, Body, Theme.Body, Theme.Dim, 88, 24 + titleH + 8, Math.Max(80, Width - 112));
 
-            int gap = 12, w = Math.Max(1, (Width - 48 - gap * 2) / 3);
-            PaintResult(g, new Rectangle(24, _successResultsY, w, 80), "Checks passed", PassedChecks.ToString(),
-                UnavailableChecks > 0 ? UnavailableChecks + " not available on this PC" : "All checks available");
-            PaintResult(g, new Rectangle(24 + w + gap, _successResultsY, w, 80), "Graphics chip", GraphicsResult,
-                "Wake-blocker check");
-            PaintResult(g, new Rectangle(24 + (w + gap) * 2, _successResultsY, w, 80), "Background apps", BackgroundResult,
-                "CPU use at last check");
+            int gap = 12, w = Math.Max(1, (Width - 48 - gap * 2) / 3), h = UnavailableChecks > 0 ? 80 : 64;
+            PaintResult(g, new Rectangle(24, _successResultsY, w, h), "Checks passed", PassedChecks.ToString(),
+                UnavailableChecks > 0 ? UnavailableChecks + " not available on this PC" : "");
+            PaintResult(g, new Rectangle(24 + w + gap, _successResultsY, w, h), "Graphics chip", GraphicsResult, "");
+            PaintResult(g, new Rectangle(24 + (w + gap) * 2, _successResultsY, w, h), "Background CPU", BackgroundResult, "");
 
             int dividerY = _successActionsY - 14;
             using (Pen rule = new Pen(Theme.Edge, 1f))
@@ -838,8 +836,9 @@ namespace PowerDial
             Theme.Str(g, label, Theme.Small, Theme.Dim, bounds.X + 14, bounds.Y + 10);
             Theme.Str(g, Theme.Fit(g, value, Theme.Head, bounds.Width - 28), Theme.Head, Theme.Text,
                 bounds.X + 14, bounds.Y + 29);
-            Theme.Str(g, Theme.Fit(g, note, Theme.Small, bounds.Width - 28), Theme.Small, Theme.Mute,
-                bounds.X + 14, bounds.Y + 58);
+            if (note.Length > 0)
+                Theme.Str(g, Theme.Fit(g, note, Theme.Small, bounds.Width - 28), Theme.Small, Theme.Mute,
+                    bounds.X + 14, bounds.Y + 58);
         }
     }
 
@@ -1158,8 +1157,7 @@ namespace PowerDial
             Theme.Quality(g);
 
             Theme.Str(g, "Most CPU-active apps", Theme.Section, Theme.Save, 20, 20);
-            Theme.Str(g, "Processor time used over the last " + Math.Max(1, WindowSeconds) +
-                         " seconds. CPU time is not app energy.",
+            Theme.Str(g, "CPU time over " + Math.Max(1, WindowSeconds) + " s; not energy use.",
                       Theme.Small, Theme.Mute, 20, 44);
 
             if (Rows.Count == 0)
@@ -1573,7 +1571,7 @@ namespace PowerDial
         public readonly PillButton SeeAll = new PillButton();
 
         const int Pitch = 34;
-        const int FirstRowY = 128;
+        const int FirstRowY = 104;
 
         public OriginalCompareCard()
         {
@@ -1642,12 +1640,8 @@ namespace PowerDial
             Theme.Quality(g);
 
             Theme.Str(g, "Compared with your original settings", Theme.Section, Theme.Save, 20, 20);
-            Theme.Str(g, "How this laptop was set up before PowerDial, against the mode you are " +
-                         "using now. Observed averages; workloads may differ.",
-                      Theme.Small, Theme.Mute, 20, 46);
-
             Theme.Str(g, Verdict.Length > 0 ? Verdict : "Not enough recorded yet",
-                      Theme.Stat, Verdict.Length > 0 ? VerdictColor : Theme.Dim, 20, 78);
+                      Theme.Stat, Verdict.Length > 0 ? VerdictColor : Theme.Dim, 20, 60);
 
             // Scaled against the thirstier of the two, so the longer bar is the one
             // costing more - the same reading as every other bar in the app.

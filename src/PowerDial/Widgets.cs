@@ -332,7 +332,8 @@ namespace PowerDial
             // a slightly different shade.
             bool leftEnd = Segment == Seg.Alone || Segment == Seg.Left;
             bool rightEnd = Segment == Seg.Alone || Segment == Seg.Right;
-            Theme.FillRound(g, r, 8, fill, border, Theme.ButtonEdge, leftEnd, rightEnd);
+            float edge = Enabled && _hot ? Theme.HoverEdge : Theme.ButtonEdge;
+            Theme.FillRound(g, r, 8, fill, border, edge, leftEnd, rightEnd);
 
             // fg, not the accent: a Primary button is now filled with the accent, so an
             // accent-coloured arc on top of it would be an invisible spinner.
@@ -689,7 +690,7 @@ namespace PowerDial
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
             Color border = (Focused || _open) ? Theme.Save : Theme.Line;
             Color fill = _hot ? ControlPaint.Light(Theme.Inset, 0.10f) : Theme.Inset;
-            Theme.FillRound(g, r, 6, fill, border);
+            Theme.FillRound(g, r, 6, fill, border, Enabled && _hot ? Theme.HoverEdge : 1f);
 
             string t = SelectedText;
             SizeF ts = g.MeasureString(t, Theme.Body);

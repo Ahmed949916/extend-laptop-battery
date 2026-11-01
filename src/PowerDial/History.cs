@@ -26,6 +26,8 @@ namespace PowerDial
         public int M { get; set; }
         public int? E { get; set; }         // remaining mWh; null in older history
         public string S { get; set; }       // recorded battery segment; changes on AC/gaps/restart
+        public int? F { get; set; }         // firmware full-charge mWh; null before health tracking
+        public int? D { get; set; }         // design mWh used with F; null if unknown
 
         [JsonIgnore]
         public DateTime When { get { return DateTimeOffset.FromUnixTimeSeconds(T).LocalDateTime; } }

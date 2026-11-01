@@ -758,9 +758,9 @@ namespace PowerDial
             hw.Controls.Add(new Label {
                 Text = "Nothing in this app, or in Windows, can give back capacity a battery has " +
                        "already lost - so nothing here pretends to. What slows further wear is " +
-                       "ordinary care: keep it off the charger at 100% for days at a time, and keep " +
-                       "it out of the heat. Everything else on these pages is about drawing less " +
-                       "from the capacity you still have.",
+                       "ordinary care: avoid days at full charge, frequent deep discharges and heat. " +
+                       "Use a manufacturer charging limit when supported. The modules below track " +
+                       "your recorded habits and capacity, and help you choose a care routine.",
                 Location = new Point(14, 42), Size = new Size(W - 30, 108),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Body, ForeColor = Theme.Dim, BackColor = Theme.Panel });
@@ -1010,6 +1010,7 @@ namespace PowerDial
             BuildPowerModes();
             TagSections();
             BuildBatteryTools();
+            BuildBatteryCare();
 
             // TagSections gives everything between the Analytics heading and the next one
             // to Insights, which is right for all of it except the health card - that is a
@@ -3085,7 +3086,10 @@ namespace PowerDial
                 M = _modeCode,
                 Top = TopSummary(),
                 E = _bat.RemainingMwh,
-                S = _segment
+                S = _segment,
+                F = Machine.HasBattery && _bat.CapacityReadAt.HasValue &&
+                    (now - _bat.CapacityReadAt.Value).TotalHours <= 6 ? _bat.FullChargeMwh : null,
+                D = Machine.HasBattery && BatteryMonitor.OriginalDesignMwh > 0 ? BatteryMonitor.OriginalDesignMwh : null
             };
             History.Append(p, _procs, interval > 90 ? 0 : interval);
             RecordForAlerts(p);
@@ -3109,6 +3113,7 @@ namespace PowerDial
                 if (_page == "overview" || _page == "insights" || _page == "modes") RefreshBasic();
                 if (_page == "insights") RefreshSessions();
                 if (_page == "modes") RefreshModes();
+                if (_page == "health") RefreshBatteryCare();
             }
         }
 
@@ -3196,6 +3201,7 @@ namespace PowerDial
 
         void RefreshAnalytics()
         {
+            RefreshBatteryCare();
             _barHealth.Segments.Clear();
 
             if (!_bat.FullChargeMwh.HasValue)

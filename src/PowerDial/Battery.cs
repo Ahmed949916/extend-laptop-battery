@@ -51,6 +51,7 @@ namespace PowerDial
 
         public int? RemainingMwh { get; private set; }
         public int? FullChargeMwh { get; private set; }
+        public DateTime? CapacityReadAt { get; private set; }
         public bool OnAc { get; private set; }
         public bool Charging { get; private set; }
         public int PercentOfFull { get; private set; }
@@ -241,6 +242,7 @@ namespace PowerDial
                 if (capacity.HasValue && capacity.Value > 0 && capacity.Value < int.MaxValue)
                 {
                     FullChargeMwh = capacity;
+                    CapacityReadAt = utc;
                     _nextCapacityRead = utc.AddHours(6);
                 }
                 else LastError = "Full-charge capacity is unavailable; keeping the last valid reading.";

@@ -49,6 +49,7 @@ namespace PowerDial
         /// the filled primary one.
         /// </summary>
         public const float ButtonEdge = 2f;
+        public const float HoverEdge = 3f;
 
         /// <summary>
         /// How heavy the outline is on the one card that is currently in effect. Same

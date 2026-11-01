@@ -32,6 +32,51 @@ raises the window that already exists rather than starting another.
 
 ## Pages
 
+**Battery health** now includes four care features:
+
+- **Charge exposure:** hours observed above 80%, plugged in above 80%, and below 20%
+  during the last seven days. Both ends of an interval must qualify; threshold crossings
+  are not assigned exposure. Gaps over 90 seconds, restarts, source changes and missing
+  telemetry are excluded. Coverage is shown explicitly, not extrapolated to a whole week.
+- **Capacity trend:** compares earlier and recent weekly medians of daily firmware
+  full-charge capacity. Requires a span of at least 14 UTC calendar days and three days
+  in each comparison week. Unknown historical capacity stays blank. Design-reference
+  changes restart the comparison; recalibration, charge limits and an undetected battery
+  replacement can still affect it. This is an observed change, not a degradation forecast.
+- **Care plans:** desk, travel and storage advice, plus links to Microsoft's battery-care
+  and Smart charging guidance. Choosing a plan changes advice only. Charging limits depend
+  on the manufacturer's hardware and software; PowerDial does not enforce them.
+- **Health CSV export:** saves retained charge, AC state and capacity readings using UTC
+  timestamps and a locale-independent format. It excludes process names. History retains
+  three calendar months; comparisons use at most 90 days. Capacity recording starts with
+  this version and reuses the existing capacity query, with no extra polling or service.
+
+### Research behind battery care (reviewed 1 November 2026)
+
+Recent work separates calendar aging from cycling and examines charge level, temperature,
+discharge depth and current. [Kiefer et al., Journal of Power Sources, January 2026](https://doi.org/10.1016/j.jpowsour.2025.238815)
+finds state of charge and discharge depth important within its tested NMC-cell conditions.
+Its fitted model does not establish a laptop-wide percentage improvement.
+[Cui et al., Journal of The Electrochemical Society, June 2025](https://doi.org/10.1149/1945-7111/adde16)
+examines long-term calendar-aging models across cell types and storage conditions. This
+supports recording exposure and capacity separately; applying its life predictions here
+would require battery-specific validation that PowerDial does not have.
+
+[Microsoft's current laptop guidance](https://support.microsoft.com/en-us/windows/experience/power-battery/caring-for-your-battery-in-windows)
+recommends a moderate daily charge range, avoiding excessive heat and frequent deep
+discharges, and roughly 40–60% charge for storage.
+[Smart charging support](https://support.microsoft.com/en-us/windows/experience/power-battery/use-smart-charging-in-windows)
+depends on the device manufacturer. The 20/80 thresholds used here are practical guidance,
+not universal electrochemical boundaries or a claim that a brief full charge causes damage.
+Full charge remains useful before travel. Software cannot restore lost chemical capacity.
+
+Further modules worth investigating are verified OEM charge-limit adapters, battery-pack
+temperature monitoring (not CPU temperature as a substitute), and sleep-drain diagnostics.
+These need capability detection, vendor documentation and hardware validation before
+automatic action. The existing runtime and process modules address energy per charge;
+the new care modules address habits and observed capacity over time. Neither promises a
+fixed percentage of additional battery lifespan.
+
 **Battery tools** contains low-charge alerts (20% by default), optional charge-target
 reminders (80%), and sustained high-drain alerts. Alerts can be snoozed for an hour.
 High-drain detection needs at least 20 prior battery records, excludes the latest ten

@@ -477,7 +477,7 @@ namespace PowerDial
             _fixApplyAll.Click += (s, e) => ApplyAllFixes();
             _fixButtons.Controls.Add(_fixApplyAll);
             _fixRecheck = new PillButton {
-                Text = "Check again", Glyph = Theme.GlyphRefresh,
+                Text = "Check again", Icon = ButtonIcon.Refresh,
                 Size = new Size(140, 36), BackColor = Theme.Panel
             };
             _fixRecheck.Click += (s, e) => RunBusy(_fixRecheck, delegate {
@@ -636,7 +636,7 @@ namespace PowerDial
             _btnMem = new PillButton { Text = "By memory", Selected = true, Segment = Seg.Left };
             _btnCpu = new PillButton { Text = "By CPU", Segment = Seg.Right };
             _btnBg = new PillButton { Text = "Background", Selected = true };
-            PillButton resetLive = new PillButton { Text = "Reset", Glyph = Theme.GlyphRefresh };
+            PillButton resetLive = new PillButton { Text = "Reset", Icon = ButtonIcon.Refresh };
 
             _btnMem.Click += (s, e) => { _sortCpu = false; RefreshProcesses(); };
             _btnCpu.Click += (s, e) => { _sortCpu = true; RefreshProcesses(); };
@@ -690,7 +690,7 @@ namespace PowerDial
                 Text = "cumulative CPU time across every session", Location = new Point(176, 13),
                 AutoSize = true, Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel });
             PillButton resetTally = new PillButton {
-                Text = "Reset tally", Glyph = Theme.GlyphUndo, Location = new Point(W - 132, 6),
+                Text = "Reset tally", Icon = ButtonIcon.Undo, Location = new Point(W - 132, 6),
                 Size = new Size(118, 26), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             // this one destroys data that took weeks to accumulate, so it asks first
             resetTally.Click += (s, e) => {
@@ -835,11 +835,11 @@ namespace PowerDial
             // Windows settings" began at x=134, so they overlapped by six pixels, and the
             // three were 36, 32 and 32 tall on the same top edge. Laid out in a row now,
             // from each label's own measured width, on one baseline.
-            PillButton recheck = new PillButton { Text = "Check again", Glyph = Theme.GlyphRefresh };
+            PillButton recheck = new PillButton { Text = "Check again", Icon = ButtonIcon.Refresh };
             recheck.Click += (s, e) => RunBusy(recheck, delegate {
                 RefreshWatch(); Log("Re-checked what could be waking the GPU."); });
 
-            PillButton opensettings = new PillButton { Text = "Open Windows settings" };
+            PillButton opensettings = new PillButton { Text = "Open Windows settings", Icon = ButtonIcon.External };
             opensettings.Click += (s, e) => GpuWatch.OpenBackgroundAppsSettings();
 
             PillButton reread = new PillButton { Text = "Re-read everything" };
@@ -882,13 +882,13 @@ namespace PowerDial
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
-            PillButton logCopy = new PillButton { Text = "Copy", BackColor = Theme.Ink };
+            PillButton logCopy = new PillButton { Text = "Copy", Icon = ButtonIcon.Copy, BackColor = Theme.Ink };
             logCopy.Click += (s, e) => CopyLog();
 
-            PillButton logSave = new PillButton { Text = "Save to a file", BackColor = Theme.Ink };
+            PillButton logSave = new PillButton { Text = "Save to a file", Icon = ButtonIcon.Save, BackColor = Theme.Ink };
             logSave.Click += (s, e) => SaveLog();
 
-            PillButton logOpen = new PillButton { Text = "Show me the file", BackColor = Theme.Ink };
+            PillButton logOpen = new PillButton { Text = "Show me the file", Icon = ButtonIcon.External, BackColor = Theme.Ink };
             logOpen.Click += (s, e) => RevealLog();
 
             LayOutRow(_logButtons, 4, logCopy, logSave, logOpen);
@@ -1816,7 +1816,7 @@ namespace PowerDial
                 int wMem = (int)Math.Ceiling(Theme.TextW(g, _btnMem.Text, Theme.Title)) + Pad;
                 int wCpu = (int)Math.Ceiling(Theme.TextW(g, _btnCpu.Text, Theme.Title)) + Pad;
                 int wBg = (int)Math.Ceiling(Theme.TextW(g, _btnBg.Text, Theme.Title)) + Pad;
-                int wRst = (int)Math.Ceiling(Theme.TextW(g, reset.Text, Theme.Title)) + Pad + 18;
+                int wRst = (int)Math.Ceiling(Theme.TextW(g, reset.Text, Theme.Title)) + Pad + reset.IconSpace();
 
                 int x = _procControls.Width;
 
@@ -1876,7 +1876,7 @@ namespace PowerDial
                 foreach (PillButton b in buttons)
                 {
                     int w = (int)Math.Ceiling(Theme.TextW(g, b.Text, Theme.Title)) + Pad;
-                    if (!string.IsNullOrEmpty(b.Glyph)) w += 18;
+                    w += b.IconSpace();
                     b.Location = new Point(x, top);
                     b.Size = new Size(w, H);
                     host.Controls.Add(b);

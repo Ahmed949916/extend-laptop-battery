@@ -649,13 +649,14 @@ namespace PowerDial
             Controls.Add(Act);
 
             Detail.Text = "Show me the detail";
+            Detail.Icon = ButtonIcon.List;
             Detail.BackColor = Theme.Panel;
             Detail.Size = new Size(176, 38);
             Detail.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             Controls.Add(Detail);
 
             Recheck.Text = "Check again";
-            Recheck.Glyph = Theme.GlyphRefresh;
+            Recheck.Icon = ButtonIcon.Refresh;
             Recheck.BackColor = Theme.Panel;
             Recheck.Size = new Size(150, 38);
             Recheck.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -734,7 +735,7 @@ namespace PowerDial
         static int Place(Graphics g, PillButton b, int x, int y, int pad, int h)
         {
             int w = (int)Math.Ceiling(Theme.TextW(g, b.Text, Theme.Title)) + pad;
-            if (!string.IsNullOrEmpty(b.Glyph)) w += 18;
+            w += b.IconSpace();
             b.SetBounds(x - w, y, w, h);
             return x - w;
         }

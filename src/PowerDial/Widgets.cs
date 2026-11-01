@@ -202,6 +202,13 @@ namespace PowerDial
         bool _tab;
 
         public string Glyph;              // optional Segoe Fluent Icons glyph
+        public ButtonIcon Icon;
+
+        public int IconSpace()
+        {
+            return Icon != ButtonIcon.None ? (int)Math.Round(24 * DeviceDpi / 96f) :
+                string.IsNullOrEmpty(Glyph) ? 0 : 18;
+        }
         bool _hot, _down;
 
         // --- working state ----------------------------------------------------------
@@ -393,11 +400,16 @@ namespace PowerDial
 
             float tx = 0;
             SizeF ts = g.MeasureString(Text, Theme.Title);
-            float gw = 0;
-            if (!string.IsNullOrEmpty(Glyph)) gw = g.MeasureString(Glyph, Theme.Icon).Width + 4;
+            float gw = IconSpace();
             tx = (Width - ts.Width - gw) / 2f;
             float ty = (Height - ts.Height) / 2f;
-            if (!string.IsNullOrEmpty(Glyph))
+            if (Icon != ButtonIcon.None)
+            {
+                float size = 16 * DeviceDpi / 96f;
+                ButtonIcons.Draw(g, Icon, new RectangleF(tx, (Height - size) / 2f, size, size), fg);
+                tx += gw;
+            }
+            else if (!string.IsNullOrEmpty(Glyph))
             {
                 SizeF gs = g.MeasureString(Glyph, Theme.Icon);
                 Theme.Str(g, Glyph, Theme.Icon, fg, tx, (Height - gs.Height) / 2f);

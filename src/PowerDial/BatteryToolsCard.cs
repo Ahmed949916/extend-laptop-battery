@@ -46,6 +46,10 @@ namespace PowerDial
             Status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(Status);
             Height = 620;
+            Snooze.Icon = ButtonIcon.Clock;
+            Pause.Icon = ButtonIcon.Pause;
+            Resume.Icon = ButtonIcon.Play;
+            Undo.Icon = ButtonIcon.Undo;
             Low.CheckedChanged += Changed; Charge.CheckedChanged += Changed; Drain.CheckedChanged += Changed; Auto.CheckedChanged += Changed;
             LowAt.SelectedIndexChanged += Changed; ChargeAt.SelectedIndexChanged += Changed;
             AutoAt.SelectedIndexChanged += Changed; Mode.SelectedIndexChanged += Changed;

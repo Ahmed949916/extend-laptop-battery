@@ -37,6 +37,9 @@ namespace PowerDial
             AddButton(ChargingHelp, "Charging support", 18, 180);
             AddButton(Evidence, "Battery care source", 210, 190);
             AddButton(Export, "Export health CSV", 412, 210);
+            ChargingHelp.Icon = ButtonIcon.External;
+            Evidence.Icon = ButtonIcon.External;
+            Export.Icon = ButtonIcon.Export;
         }
 
         Label TextAt(string text, int y, int height, Font font, Color color)

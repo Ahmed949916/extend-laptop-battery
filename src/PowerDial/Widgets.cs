@@ -742,7 +742,7 @@ namespace PowerDial
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
             Color border = (Focused || _open) ? Theme.Save : Theme.Line;
             Color fill = _hot ? ControlPaint.Light(Theme.Inset, 0.10f) : Theme.Inset;
-            Theme.FillRound(g, r, 6, fill, border, Enabled && _hot ? Theme.HoverEdge : 1f);
+            Theme.FillRound(g, r, 6, fill, border, Enabled && _hot ? Theme.HoverEdge : Theme.ButtonEdge);
 
             string t = SelectedText;
             SizeF ts = g.MeasureString(t, Theme.Body);

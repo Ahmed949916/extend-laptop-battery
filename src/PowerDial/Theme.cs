@@ -45,15 +45,15 @@ namespace PowerDial
         /// How heavy a button's outline is. One pixel of #646F7E clears the 3:1 minimum for
         /// a control boundary on paper, but on a dark ground at laptop density it reads as
         /// a smudge rather than an edge - a button looked like a slightly different shade
-        /// of panel. Two pixels is what makes the outlined buttons read as buttons beside
+        /// of panel. Three pixels makes the outlined buttons read as buttons beside
         /// the filled primary one.
         /// </summary>
-        public const float ButtonEdge = 2f;
+        public const float ButtonEdge = 3f;
         public const float HoverEdge = 3f;
 
         /// <summary>
         /// How heavy the outline is on the one card that is currently in effect. Same
-        /// reasoning as ButtonEdge, and the same weight on purpose: a green hairline said
+        /// reasoning as ButtonEdge: a green hairline said
         /// "this is the mode you are in" so quietly that the tick and the IN USE NOW pill
         /// were carrying the state on their own.
         /// </summary>

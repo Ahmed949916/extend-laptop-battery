@@ -9,6 +9,7 @@ sealed partial class SelfTest
 
     static void Main(string[] args)
     {
+        if (Array.IndexOf(args, "--app-end-fixture") >= 0) { Thread.Sleep(60000); return; }
         RegressionChecks();
         if (Array.IndexOf(args, "--regression-only") >= 0)
         {

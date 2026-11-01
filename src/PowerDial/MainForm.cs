@@ -620,7 +620,7 @@ namespace PowerDial
             ac.Controls.Add(_histLabel);
             _root.Controls.Add(ac);
 
-            Card pc = new Card { Width = W, Height = 292, Margin = new Padding(0, 0, 0, 10) };
+            Card pc = new Card { Width = W, Height = 342, Margin = new Padding(0, 0, 0, 10) };
             _procLabel = new Label {
                 Text = "Most CPU-active apps", Location = new Point(14, 10), Size = new Size(300, 20),
                 Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel,
@@ -680,6 +680,10 @@ namespace PowerDial
                 Location = new Point(14, 262), Size = new Size(W - 30, 18), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             pc.Controls.Add(_procTotals);
+            PillButton manageApps = new PillButton { Text = "Manage background apps", Icon = ButtonIcon.List,
+                Location = new Point(14, 294), Size = new Size(244, 34), BackColor = Theme.Panel };
+            manageApps.Click += (s, e) => ManageBackgroundApps();
+            pc.Controls.Add(manageApps);
             _root.Controls.Add(pc);
 
             Card oc = new Card { Width = W, Height = 216, Margin = new Padding(0, 0, 0, 10) };
@@ -1391,6 +1395,7 @@ namespace PowerDial
             _cardAdvice.Recheck.Click += (s, e) => RunBusy(_cardAdvice.Recheck, delegate {
                 LoadValues(); RefreshWatch(); RefreshFixes(); });
             _cardMode.Change.Click += (s, e) => SetPage("modes");
+            _cardApps.ManageApps.Click += (s, e) => ManageBackgroundApps();
             // Diagnostics has the GPU watch and the log; neither is a list of apps. The
             // full ranking is "Running now" on Insights, so that is where See all goes -
             // and it arrives sorted the way the card was, by processor time.
@@ -1774,7 +1779,7 @@ namespace PowerDial
 
             // Two cards side by side at different heights read as one of them having
             // failed to finish, so the apps card takes whichever is taller.
-            int h = Math.Max(212, _cardMode.Height);
+            int h = Math.Max(264, _cardMode.Height);
             _cardMode.Height = h;
             _cardApps.Height = h;
             _overviewPair.Height = h;

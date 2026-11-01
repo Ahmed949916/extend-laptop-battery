@@ -173,6 +173,7 @@ namespace PowerDial
     public sealed class PillButton : Control
     {
         public bool Primary;
+        public bool Destructive;
         public bool Selected;
 
         /// <summary>
@@ -368,7 +369,8 @@ namespace PowerDial
             // same visual weight as everything beside it, which is how "Restore original
             // settings" ended up looking like the main thing to do on the profiles section.
             Color fill, border, fg;
-            if (Selected)      { fill = Theme.Raise; border = Theme.Save; fg = Theme.Text; }
+            if (Destructive)   { fill = Theme.Alert; border = Theme.Alert; fg = Theme.Ink; }
+            else if (Selected) { fill = Theme.Raise; border = Theme.Save; fg = Theme.Text; }
             else if (Primary)  { fill = Theme.Save;  border = Theme.Save; fg = Theme.Ink;  }
             else               { fill = Theme.Inset; border = Theme.Line; fg = Theme.Text; }
 

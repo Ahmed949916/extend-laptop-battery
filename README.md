@@ -32,6 +32,24 @@ raises the window that already exists rather than starting another.
 
 ## Pages
 
+**Manage background apps** is available on the Overview app card and on Insights. Both
+open the same guarded review before ending anything.
+It offers only a conservative list of recognised browsers, messaging, media, sync and
+game-launcher apps that were sampled without an open window. Windows processes, services,
+other users/sessions, elevated processes, critical processes and PowerDial are excluded.
+Unknown apps are deliberately unavailable; the main process table still displays them.
+
+The review shows readable app names (for example Microsoft Edge), process IDs and
+executable paths in a scrollable table. Ending requires a second confirmation inside the
+modal, with **Keep running** focused by default. The final action moves away from the
+initial button to prevent a double click from confirming it. **Refresh apps** captures a
+new review before another app can be ended. It is a forced stop: save work first, since downloads,
+calls and syncing can be interrupted. Only the captured processes are targeted, never a
+process tree or a newly spawned replacement. Ownership and protection checks run again
+before ending; retained kernel handles prevent a reused PID from selecting a different
+app. Exits are verified and the outcome is logged. Apps may restart, and no fixed battery
+saving is promised. This module runs only when opened, adds no polling and never elevates.
+
 **Battery health** now includes four care features:
 
 - **Charge exposure:** hours observed above 80%, plugged in above 80%, and below 20%

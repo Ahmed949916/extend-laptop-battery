@@ -999,6 +999,8 @@ namespace PowerDial
 
         public readonly PillButton SeeAll = new PillButton();
 
+        public readonly PillButton ManageApps = new PillButton();
+
         const int NameW = 128;
         const int FigW = 74;
         const int FirstRowY = 80;
@@ -1027,6 +1029,12 @@ namespace PowerDial
             SeeAll.BackColor = Theme.Panel;
             SeeAll.Size = new Size(104, 34);
             Controls.Add(SeeAll);
+
+            ManageApps.Text = "Manage background apps";
+            ManageApps.Icon = ButtonIcon.List;
+            ManageApps.BackColor = Theme.Panel;
+            ManageApps.Size = new Size(244, 34);
+            Controls.Add(ManageApps);
 
             // A tooltip is its own top-level window, so the full name is never clipped by
             // the card or by the edge of the app the way an in-card overlay would be.
@@ -1140,6 +1148,7 @@ namespace PowerDial
         {
             base.OnSizeChanged(e);
             SeeAll.Location = new Point(Math.Max(24, Width - SeeAll.Width - 20), 18);
+            if (ManageApps != null) ManageApps.Location = new Point(20, Height - 52);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1202,7 +1211,7 @@ namespace PowerDial
                 Theme.FocusRing(g, new Rectangle(16, FirstRowY + _focusRow * Pitch - 3,
                                                  Math.Max(40, Width - 32), Pitch), 4);
 
-            Theme.Str(g, "BG marks an app with no window open.", Theme.Small, Theme.Mute, 20, Height - 26);
+            Theme.Str(g, "BG marks an app with no window open.", Theme.Small, Theme.Mute, 20, Height - 76);
         }
     }
 

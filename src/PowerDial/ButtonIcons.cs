@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 
 namespace PowerDial
 {
-    public enum ButtonIcon { None, Refresh, Undo, Export, External, Clock, Pause, Play, List, Copy, Save }
+    public enum ButtonIcon { None, Refresh, Undo, Export, External, Clock, Pause, Play, List, Copy, Save, Stop }
 
     /// <summary>Small outline icons drawn locally so buttons never depend on an installed icon font.</summary>
     internal static class ButtonIcons
@@ -43,6 +43,9 @@ namespace PowerDial
                             break;
                         case ButtonIcon.Pause:
                             g.DrawLine(pen, 5, 3, 5, 13); g.DrawLine(pen, 11, 3, 11, 13);
+                            break;
+                        case ButtonIcon.Stop:
+                            g.DrawRectangle(pen, 3, 3, 10, 10);
                             break;
                         case ButtonIcon.Play:
                             g.DrawPolygon(pen, new PointF[] { new PointF(4, 2), new PointF(13, 8), new PointF(4, 14) });

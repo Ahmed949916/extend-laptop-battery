@@ -67,6 +67,58 @@ namespace PowerDial
         }
     }
 
+    /// <summary>Native checkbox behaviour with the application's palette and focus treatment.</summary>
+    internal sealed class ThemedCheckBox : CheckBox
+    {
+        bool _hot, _down;
+
+        internal ThemedCheckBox()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hot = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hot = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { Theme.KeyboardNav = false; _down = true; Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnKeyDown(KeyEventArgs e) { Theme.KeyboardNav = true; Invalidate(); base.OnKeyDown(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            Theme.Quality(g);
+            g.Clear(BackColor);
+            float scale = DeviceDpi / 96f;
+            int size = (int)Math.Round(18 * scale);
+            Rectangle box = new Rectangle(1, (Height - size) / 2, size, size);
+            Color fill = !Enabled ? Theme.Inset : Checked ? Theme.Save : _hot ? Theme.Raise : Theme.Inset;
+            if (Enabled && _down) fill = ControlPaint.Dark(fill, 0.06f);
+            Color border = !Enabled ? Theme.Edge : Checked ? Theme.Save : Theme.Line;
+            Theme.FillRound(g, box, (int)Math.Round(4 * scale), fill, border,
+                (Enabled && _hot ? Theme.HoverEdge : Theme.ButtonEdge) * scale);
+            if (Checked)
+            {
+                using (Pen pen = new Pen(Enabled ? Theme.Ink : Theme.Mute, 2 * scale))
+                {
+                    pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
+                    g.DrawLines(pen, new PointF[] {
+                        new PointF(box.X + size * 0.24f, box.Y + size * 0.51f),
+                        new PointF(box.X + size * 0.43f, box.Y + size * 0.70f),
+                        new PointF(box.X + size * 0.77f, box.Y + size * 0.30f) });
+                }
+            }
+            int textX = box.Right + (int)Math.Round(9 * scale);
+            TextRenderer.DrawText(g, Text, Font, new Rectangle(textX, 0, Math.Max(0, Width - textX), Height),
+                Enabled ? ForeColor : Theme.Mute, TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis | (ShowKeyboardCues ? TextFormatFlags.Default : TextFormatFlags.HidePrefix));
+            if (Focused && Theme.KeyboardNav) Theme.FocusRing(g, ClientRectangle, 4);
+        }
+    }
+
     /// <summary>Rounded surface panel.</summary>
     public class Card : Panel
     {

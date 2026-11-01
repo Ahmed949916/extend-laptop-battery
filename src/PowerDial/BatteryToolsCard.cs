@@ -6,7 +6,7 @@ namespace PowerDial
 {
     internal sealed class BatteryToolsCard : Card
     {
-        internal readonly CheckBox Low = new CheckBox(), Charge = new CheckBox(), Drain = new CheckBox(), Auto = new CheckBox();
+        internal readonly CheckBox Low = new ThemedCheckBox(), Charge = new ThemedCheckBox(), Drain = new ThemedCheckBox(), Auto = new ThemedCheckBox();
         internal readonly Picker LowAt = new Picker(), ChargeAt = new Picker(), AutoAt = new Picker(), Mode = new Picker();
         internal readonly PillButton Snooze = new PillButton(), Pause = new PillButton(), Resume = new PillButton(), Undo = new PillButton();
         internal readonly Label Status = new Label();

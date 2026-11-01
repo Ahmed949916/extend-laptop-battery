@@ -628,6 +628,10 @@ namespace PowerDial
         public readonly PillButton Detail = new PillButton();
 
         public readonly PillButton Recheck = new PillButton();
+        bool _reflowing;
+        int _successResultsY, _successActionsY;
+        public int PassedChecks, UnavailableChecks;
+        public string GraphicsResult = "Not checked", BackgroundResult = "Not sampled", LastChecked = "";
 
         public AdviceCard()
         {
@@ -661,18 +665,36 @@ namespace PowerDial
         public void Describe()
         {
             AccessibleName = Title;
-            AccessibleDescription = Body + (Note.Length > 0 ? " " + Note : "");
+            AccessibleDescription = Body + (Note.Length > 0 ? " " + Note : "") +
+                (!Warn ? " " + PassedChecks + " checks passed. Graphics chip: " + GraphicsResult +
+                    ". Background apps: " + BackgroundResult + ". " + LastChecked : "");
         }
 
         /// <summary>Buttons sit under the copy, and the copy reflows with the card, so the
         /// row has to be placed after the text has been measured rather than at a fixed y.</summary>
         public void Reflow(Graphics g)
         {
-            float bodyH = TextHeight(g, Body, Theme.Body, Width - 92);
-            float noteH = Note.Length > 0 ? TextHeight(g, Note, Theme.Small, Width - 92) + 6 : 0;
-            int y = (int)(58 + bodyH + noteH) + 10;
-            PlaceButtons(y);
-            Height = y + Act.Height + (AllSet ? 52 : 22);
+            if (_reflowing) return;
+            _reflowing = true;
+            try
+            {
+                if (!Warn)
+                {
+                    float titleH = TextHeight(g, Title, Theme.Head, Width - 280);
+                    float bodyH = TextHeight(g, Body, Theme.Body, Width - 112);
+                    _successResultsY = (int)Math.Ceiling(Math.Max(80, 24 + titleH + 8 + bodyH)) + 18;
+                    _successActionsY = _successResultsY + 108;
+                    PlaceButtons(_successActionsY);
+                    Height = _successActionsY + Recheck.Height + 20;
+                    return;
+                }
+                float warningBodyH = TextHeight(g, Body, Theme.Body, Width - 92);
+                float noteH = Note.Length > 0 ? TextHeight(g, Note, Theme.Small, Width - 92) + 6 : 0;
+                int y = (int)(58 + warningBodyH + noteH) + 10;
+                PlaceButtons(y);
+                Height = y + Act.Height + (AllSet ? 52 : 22);
+            }
+            finally { _reflowing = false; }
         }
 
         /// <summary>
@@ -720,7 +742,13 @@ namespace PowerDial
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
-            if (Act.Top > 0) PlaceButtons(Act.Top);
+            if (_reflowing || Recheck == null) return;
+            if (!Warn)
+            {
+                using (Bitmap bmp = new Bitmap(1, 1))
+                using (Graphics g = Graphics.FromImage(bmp)) Reflow(g);
+            }
+            else if (Act.Top > 0) PlaceButtons(Act.Top);
         }
 
         static float TextHeight(Graphics g, string s, Font f, int width)
@@ -734,6 +762,12 @@ namespace PowerDial
             base.OnPaint(e);
             Graphics g = e.Graphics;
             Theme.Quality(g);
+
+            if (!Warn)
+            {
+                PaintSuccess(g);
+                return;
+            }
 
             Color accent = Warn ? Theme.Spend : Theme.Save;
 
@@ -763,6 +797,48 @@ namespace PowerDial
                 StatusCard.Tick(g, 24, ry + 14, 12, Theme.Save);
                 Theme.Str(g, FooterText, Theme.Small, Theme.Dim, 46, ry + 12);
             }
+        }
+
+        void PaintSuccess(Graphics g)
+        {
+            // A familiar battery silhouette identifies the subject; the text badge carries status.
+            Theme.FillRound(g, new Rectangle(24, 24, 48, 48), 12, Theme.Inset);
+            Theme.FillRound(g, new Rectangle(33, 39, 28, 18), 4, Theme.Inset, Theme.Save, 2f);
+            using (SolidBrush accent = new SolidBrush(Theme.Save))
+            {
+                g.FillRectangle(accent, 62, 44, 3, 8);
+                for (int i = 0; i < 3; i++) g.FillRectangle(accent, 38 + i * 7, 44, 4, 8);
+            }
+
+            Rectangle badge = new Rectangle(Width - 166, 24, 142, 28);
+            Theme.FillRound(g, badge, 14, Color.FromArgb(26, 54, 47));
+            Theme.Str(g, "No action needed", Theme.Small, Theme.Save, badge.X + 17, badge.Y + 6);
+            float titleH = Theme.Wrap(g, Title, Theme.Head, Theme.Text, 88, 24, Math.Max(80, Width - 280));
+            Theme.Wrap(g, Body, Theme.Body, Theme.Dim, 88, 24 + titleH + 8, Math.Max(80, Width - 112));
+
+            int gap = 12, w = Math.Max(1, (Width - 48 - gap * 2) / 3);
+            PaintResult(g, new Rectangle(24, _successResultsY, w, 80), "Checks passed", PassedChecks.ToString(),
+                UnavailableChecks > 0 ? UnavailableChecks + " not available on this PC" : "All checks available");
+            PaintResult(g, new Rectangle(24 + w + gap, _successResultsY, w, 80), "Graphics chip", GraphicsResult,
+                "Wake-blocker check");
+            PaintResult(g, new Rectangle(24 + (w + gap) * 2, _successResultsY, w, 80), "Background apps", BackgroundResult,
+                "CPU use at last check");
+
+            int dividerY = _successActionsY - 14;
+            using (Pen rule = new Pen(Theme.Edge, 1f))
+                g.DrawLine(rule, 24, dividerY, Width - 24, dividerY);
+            if (Detail.Left > 260)
+                Theme.Str(g, LastChecked, Theme.Small, Theme.Mute, 24, _successActionsY + 11);
+        }
+
+        static void PaintResult(Graphics g, Rectangle bounds, string label, string value, string note)
+        {
+            Theme.FillRound(g, bounds, 8, Theme.Inset);
+            Theme.Str(g, label, Theme.Small, Theme.Dim, bounds.X + 14, bounds.Y + 10);
+            Theme.Str(g, Theme.Fit(g, value, Theme.Head, bounds.Width - 28), Theme.Head, Theme.Text,
+                bounds.X + 14, bounds.Y + 29);
+            Theme.Str(g, Theme.Fit(g, note, Theme.Small, bounds.Width - 28), Theme.Small, Theme.Mute,
+                bounds.X + 14, bounds.Y + 58);
         }
     }
 

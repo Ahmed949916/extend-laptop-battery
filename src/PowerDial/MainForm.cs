@@ -1617,6 +1617,7 @@ namespace PowerDial
             }
 
             _adviceFix = null;
+            _cardAdvice.Detail.Text = "Show me the detail";
             _cardAdvice.FooterText = "Every power setting PowerDial can change is already set for long battery life.";
 
             if (fixable > 0)
@@ -1652,9 +1653,23 @@ namespace PowerDial
             else
             {
                 _cardAdvice.Warn = false;
-                _cardAdvice.Title = "Nothing left to change";
-                _cardAdvice.Body = "Every power setting this app can write is already set for long " +
-                                   "battery life, and nothing is holding the graphics chip awake.";
+                _cardAdvice.Title = "Power settings optimised";
+                _cardAdvice.Body = "No recommended changes from the latest power check.";
+                _cardAdvice.PassedChecks = 0;
+                _cardAdvice.UnavailableChecks = 0;
+                _cardAdvice.GraphicsResult = "Not checked";
+                _cardAdvice.BackgroundResult = "Not sampled";
+                foreach (CheckResult check in _fixChecks.Items)
+                {
+                    if (check.State == CheckState.Fine) _cardAdvice.PassedChecks++;
+                    if (check.State == CheckState.NotHere) _cardAdvice.UnavailableChecks++;
+                    if (check.Name == "Discrete GPU held awake")
+                        _cardAdvice.GraphicsResult = check.State == CheckState.NotHere ? "Not applicable" : "No blockers found";
+                    if (check.Name == "Background processes")
+                        _cardAdvice.BackgroundResult = check.State == CheckState.NotHere ? "Not sampled" : check.Value;
+                }
+                _cardAdvice.LastChecked = _fixWhen.Text;
+                _cardAdvice.Detail.Text = "View checks";
                 _cardAdvice.Note = "";
                 _cardAdvice.AllSet = false;
                 _cardAdvice.Act.Visible = false;

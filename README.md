@@ -47,13 +47,22 @@ Unknown apps are deliberately unavailable; the main process table still displays
 The review shows readable app names (for example Microsoft Edge), process IDs and
 executable paths in a scrollable table. Ending requires a second confirmation inside the
 modal, with **Keep running** focused by default. The final action moves away from the
-initial button to prevent a double click from confirming it. **Refresh apps** captures a
-new review before another app can be ended. It is a forced stop: save work first, since downloads,
+initial button to prevent a double click from confirming it. The modal appears immediately
+and checks apps asynchronously; refreshing preserves the selected app when still eligible.
+**Review another** captures a fresh review after an ending attempt. Supported names also
+include WhatsApp.Root, Signal, Thunderbird, Vivaldi, Google Drive, OBS Studio and additional
+media and game-launcher clients, subject to the same exclusions.
+It is a forced stop: save work first, since downloads,
 calls and syncing can be interrupted. Only the captured processes are targeted, never a
 process tree or a newly spawned replacement. Ownership and protection checks run again
 before ending; retained kernel handles prevent a reused PID from selecting a different
 app. Exits are verified and the outcome is logged. Apps may restart, and no fixed battery
 saving is promised. This module runs only when opened, adds no polling and never elevates.
+
+Startup shows preparation stages while hardware detection runs off the UI thread. Narrow
+windows replace the sidebar with a page selector; dense cards retain a readable minimum
+width and remain reachable through horizontal scrolling. The main window supports widths
+down to 480 pixels and the app review down to 560 pixels (before display scaling).
 
 **Battery health** now includes four care features:
 

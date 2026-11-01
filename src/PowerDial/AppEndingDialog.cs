@@ -120,7 +120,7 @@ namespace PowerDial
                 if (_review != null) _review.Dispose();
                 _review = next;
                 foreach (AppEndGroup group in _review.Groups)
-                    _apps.Items.Add(group.DisplayName + " · " + group.Targets.Count + " processes");
+                    _apps.Items.Add(group.DisplayName + " · " + group.Targets.Count + (group.Targets.Count == 1 ? " process" : " processes"));
                 _used = false; _confirming = false; _end.Destructive = false;
                 _apps.Enabled = _review.Groups.Count > 0; _end.Enabled = _apps.Enabled; _refresh.Enabled = true;
                 _done.Text = "Close"; _refresh.Text = "Refresh apps";
@@ -134,6 +134,7 @@ namespace PowerDial
             }
             catch (Exception ex)
             {
+                if (IsDisposed) return;
                 _status.Text = "Could not refresh apps: " + ex.Message;
                 _apps.Enabled = false; _end.Enabled = false;
                 _appName.Text = "App review unavailable"; _appInfo.Text = "Refresh to try again."; _count.Text = "";
@@ -189,8 +190,8 @@ namespace PowerDial
             {
                 _confirming = true; _apps.Enabled = false; _refresh.Enabled = false;
                 _noticeTitle.Text = "End " + group.DisplayName + "?";
-                _notice.Text = "Unsaved work may be lost. This forcibly stops all " + group.Targets.Count +
-                    " listed processes and cannot be undone. Choose Keep running to cancel.";
+                _notice.Text = "Unsaved work may be lost. This forcibly stops " + group.Targets.Count +
+                    (group.Targets.Count == 1 ? " listed process" : " listed processes") + ". Choose Keep running to cancel.";
                 _end.Text = "End app now"; _end.Destructive = true; _end.Invalidate();
                 _done.Text = "Keep running"; LayoutActions(); _done.Focus(); return;
             }

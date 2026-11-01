@@ -461,7 +461,7 @@ namespace PowerDial
 
             // ---- the three measurements that follow from it ---------------------------
             int x = 272;
-            int col = Math.Max(150, (Width - 272 - 24) / 3);
+            int col = Math.Max(100, (Width - 272 - 24) / 3);
 
             float noteH = 0;
 

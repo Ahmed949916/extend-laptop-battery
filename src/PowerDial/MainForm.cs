@@ -164,7 +164,7 @@ namespace PowerDial
 
         public MainForm() : this(null) { }
 
-        internal MainForm(Action<string, int> startup)
+        internal MainForm(Action<string, int> startup, bool machineReady = false)
         {
             Text = "PowerDial";
             BackColor = Theme.Ink;
@@ -182,7 +182,7 @@ namespace PowerDial
             Icon = MakeIcon();
             DoubleBuffered = true;
 
-            Machine.Detect(false);
+            if (!machineReady) Machine.Detect(false);
             if (startup != null) startup("Reading power settings", 1);
 
             // Before BuildUi, not after. The restore point is what the Default profile is
@@ -339,7 +339,7 @@ namespace PowerDial
             if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
             Rectangle work = Screen.FromControl(this).WorkingArea;
             int maxH = work.Height - 90;
-            int wantW = Math.Min(WMax + Rail + 34, Math.Max(W + Rail + 34, (int)(work.Width * 0.68)));
+            int wantW = Math.Min(work.Width - 32, Math.Min(WMax + Rail + 34, Math.Max(W + Rail + 34, (int)(work.Width * 0.68))));
             ClientSize = new Size(wantW, Math.Min(940, Math.Max(520, maxH)));
             CenterToScreen();
             Relayout();

@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace PowerDial
@@ -29,12 +30,21 @@ namespace PowerDial
         {
             using (StartupScreen splash = new StartupScreen())
             {
-                splash.Show(); splash.Update();
-                using (MainForm main = new MainForm(splash.SetStage))
+                MainForm main = null;
+                Exception failure = null;
+                splash.Shown += async (s, e) =>
                 {
-                    splash.Close();
-                    Application.Run(main);
-                }
+                    try
+                    {
+                        await Task.Run(() => Machine.Detect(false));
+                        main = new MainForm(splash.SetStage, true);
+                    }
+                    catch (Exception ex) { failure = ex; }
+                    finally { splash.Close(); }
+                };
+                Application.Run(splash);
+                if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+                using (main) Application.Run(main);
             }
         }
     }

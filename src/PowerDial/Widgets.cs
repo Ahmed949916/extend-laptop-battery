@@ -18,6 +18,12 @@ namespace PowerDial
     /// </summary>
     public sealed class SteadyPanel : FlowLayoutPanel
     {
+        public SteadyPanel()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint, true);
+        }
+
         /// <summary>
         /// Raised whenever the view has actually moved, whatever moved it.
         ///

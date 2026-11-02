@@ -1782,16 +1782,17 @@ namespace PowerDial
         {
             if (_cardMode == null || _cardApps == null || _overviewPair == null) return;
 
+            int measuredHeight;
             using (Bitmap bmp = new Bitmap(1, 1))
             using (Graphics g = Graphics.FromImage(bmp))
             {
                 Theme.Quality(g);
-                _cardMode.Fit(g);
+                measuredHeight = _cardMode.MeasureHeight(g);
             }
 
             // Two cards side by side at different heights read as one of them having
             // failed to finish, so the apps card takes whichever is taller.
-            int h = Math.Max(264, _cardMode.Height);
+            int h = Math.Max(264, measuredHeight);
             _cardMode.Height = h;
             _cardApps.Height = h;
             _overviewPair.Height = h;

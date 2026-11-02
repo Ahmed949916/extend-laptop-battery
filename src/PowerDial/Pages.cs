@@ -42,7 +42,7 @@ namespace PowerDial
             {
                 Theme.Quality(g);
                 float h = Theme.WrapHeight(g, Subtitle, Theme.Body, Math.Max(80, Width - 20));
-                Height = (int)Math.Ceiling(48 + h + 12);
+                Height = (int)Math.Ceiling(58 + h + 12);
             }
         }
 
@@ -58,7 +58,14 @@ namespace PowerDial
             Theme.Quality(g);
             g.Clear(BackColor);
             Theme.Str(g, Title, Theme.Page, Theme.Lead, 2, 10);
-            Theme.Wrap(g, Subtitle, Theme.Body, Theme.Dim, 2, 48, Math.Max(80, Width - 20));
+            // A short inset rule ties the heading to its content without spanning the page.
+            float ruleWidth = Math.Max(24, Math.Min(120, Theme.TextW(g, Title, Theme.Page) - 18));
+            using (Pen rule = new Pen(Theme.Lead, 3f))
+            {
+                rule.StartCap = LineCap.Round; rule.EndCap = LineCap.Round;
+                g.DrawLine(rule, 20, 46, 20 + ruleWidth, 46);
+            }
+            Theme.Wrap(g, Subtitle, Theme.Body, Theme.Dim, 2, 58, Math.Max(80, Width - 20));
         }
     }
 
@@ -899,7 +906,7 @@ namespace PowerDial
         /// how many lines it wraps to depends on both. Returns the height so the caller
         /// can level the card beside it.
         /// </summary>
-        public int Fit(Graphics g)
+        public int MeasureHeight(Graphics g)
         {
             float tx = 16 + (Known ? 24 : 0);
             float textW = Math.Max(60, Math.Max(80, Width - 40) - tx - 14);
@@ -908,8 +915,8 @@ namespace PowerDial
                 : g.MeasureString(Blurb, Theme.Small, (int)textW).Height;
 
             _boxH = Math.Max(MinBoxH, (int)Math.Ceiling(30 + blurbH + 12));
-            Height = BoxY + _boxH + BelowBox;
-            return Height;
+            // Measuring must not shrink the live control before its row is levelled.
+            return BoxY + _boxH + BelowBox;
         }
 
         protected override void OnSizeChanged(EventArgs e)

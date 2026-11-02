@@ -1,10 +1,20 @@
 using System.Collections.Generic;
+using System.Drawing;
 using PowerDial;
 
 sealed partial class SelfTest
 {
     static void RefreshChecks()
     {
+        using (ModeSummaryCard card = new ModeSummaryCard { Width = 360, Height = 264, Known = true, Blurb = "Battery saver" })
+        using (Bitmap bitmap = new Bitmap(1, 1))
+        using (Graphics graphics = Graphics.FromImage(bitmap))
+        {
+            int resizeEvents = 0;
+            card.SizeChanged += (s, e) => resizeEvents++;
+            int measured = card.MeasureHeight(graphics);
+            Check("measuring the power-mode card does not expose its background", measured > 0 && card.Height == 264 && resizeEvents == 0);
+        }
         Check("refresh guards block mouse clicks and keyboard actions", RefreshInputGate.IsInteraction(0x201, 0) &&
             RefreshInputGate.IsInteraction(0x202, 0) && RefreshInputGate.IsInteraction(0x100, 0));
         Check("refresh guards allow painting and normal hover", !RefreshInputGate.IsInteraction(0xF, 0) &&

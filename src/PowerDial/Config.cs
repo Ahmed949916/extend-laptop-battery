@@ -15,6 +15,10 @@ namespace PowerDial
     public sealed class Config
     {
         public int Version { get; set; }
+        public bool OmenChargeLimitEnabled { get; set; }
+        public bool OmenPauseOwned { get; set; }
+        public int ResumeChargePercent { get; set; } = 40;
+        public int PauseChargePercent { get; set; } = 70;
         public BatteryToolsOptions BatteryTools { get; set; } = new BatteryToolsOptions();
         public BatteryToolsState BatteryState { get; set; } = new BatteryToolsState();
 
@@ -71,6 +75,8 @@ namespace PowerDial
                     }
                     catch { }
                     if (_current == null) _current = new Config();
+                    _current.ResumeChargePercent = Math.Clamp(_current.ResumeChargePercent, 1, 99);
+                    _current.PauseChargePercent = Math.Clamp(_current.PauseChargePercent, _current.ResumeChargePercent + 1, 100);
                     if (_current.WindowSeconds < 15) _current.WindowSeconds = 60;
                     if (_current.BatteryTools == null) _current.BatteryTools = new BatteryToolsOptions();
                     if (_current.BatteryState == null) _current.BatteryState = new BatteryToolsState();

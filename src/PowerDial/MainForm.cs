@@ -47,7 +47,7 @@ namespace PowerDial
         ComparisonFilterCard _comparisonFilter;
         bool _similarSessions;
         Card _cardHealth;           // Battery health, its own page
-        Card _cardHealthAdvice;     // and the one honest thing to say about wear
+
         Label _healthPct;           // the headline percentage
         StatusCard _cardStatus;     // Overview: the battery, stated once
         AdviceCard _cardAdvice;     // Overview: the one thing worth doing
@@ -215,6 +215,7 @@ namespace PowerDial
                 // of these samples, so thinning them out would cost the measurement.
                 CheckMonitorGap();
                 _bat.Poll();
+                UpdateChargeLimit();
                 CheckPowerSource();
                 PushSample();
 
@@ -292,6 +293,7 @@ namespace PowerDial
             if (startup != null) startup("Checking battery and app activity", 3);
             int pruned = History.Prune();
             _bat.Poll();
+            UpdateChargeLimit();
             _procs = _procWatch.Sample();
             LoadValues();
             RefreshReadout();
@@ -736,7 +738,7 @@ namespace PowerDial
             Card hc = new Card { Width = W, Height = 210, Margin = new Padding(0, 0, 0, 10) };
             _cardHealth = hc;
             hc.Controls.Add(new Label {
-                Text = "How much charge it still holds", Location = new Point(14, 12), AutoSize = true,
+                Text = "Full-charge capacity", Location = new Point(14, 12), AutoSize = true,
                 Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
 
             // The figure first, in the size the figure deserves. It was a clause in the
@@ -762,24 +764,6 @@ namespace PowerDial
                 Font = Theme.Small, ForeColor = Theme.Dim, BackColor = Theme.Panel };
             hc.Controls.Add(_healthNote);
             _root.Controls.Add(hc);
-
-            // Wear is permanent, so the page says so once rather than implying a setting
-            // somewhere could undo it.
-            Card hw = new Card { Width = W, Height = 162, Margin = new Padding(0, 0, 0, 10) };
-            _cardHealthAdvice = hw;
-            hw.Controls.Add(new Label {
-                Text = "What you can do about it", Location = new Point(14, 12), AutoSize = true,
-                Font = Theme.Section, ForeColor = Theme.Save, BackColor = Theme.Panel });
-            hw.Controls.Add(new Label {
-                Text = "Nothing in this app, or in Windows, can give back capacity a battery has " +
-                       "already lost - so nothing here pretends to. What slows further wear is " +
-                       "ordinary care: avoid days at full charge, frequent deep discharges and heat. " +
-                       "Use a manufacturer charging limit when supported. The modules below track " +
-                       "your recorded habits and capacity, and help you choose a care routine.",
-                Location = new Point(14, 42), Size = new Size(W - 30, 108),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = Theme.Body, ForeColor = Theme.Dim, BackColor = Theme.Panel });
-            _root.Controls.Add(hw);
 
             // ---------------------------------------------------------- more
             // Both of these are collapsed and neither is needed on a normal day, so they
@@ -1033,7 +1017,7 @@ namespace PowerDial
             // own page. Retagging it here keeps the build order (and so the layout order)
             // of the column alone.
             if (_cardHealth != null) _cardHealth.Tag = "Battery health";
-            if (_cardHealthAdvice != null) _cardHealthAdvice.Tag = "Battery health";
+
             foreach (ModeCard mc in _modeCards) mc.Tag = "Profiles";
 
             // The cards go where the button row was, above Restore - a flow panel lays its
@@ -1148,6 +1132,12 @@ namespace PowerDial
 
             SetTitle(key);
 
+            if (_chargeLimit != null && (key == "overview" || key == "health"))
+            {
+                _root.Controls.SetChildIndex(_bottomPad, _root.Controls.Count - 1);
+                _root.Controls.SetChildIndex(_chargeLimit, key == "health" ? 1 : _root.Controls.Count - 2);
+            }
+
             foreach (Control c in _root.Controls)
             {
                 if (c == null) continue;
@@ -1160,6 +1150,7 @@ namespace PowerDial
                 // leaves them untagged - and untagged falls to Overview, which is where
                 // they belong.
                 bool on = PageOf(c.Tag as string) == key;
+                if (c == _chargeLimit) on = key == "overview" || key == "health";
 
                 // Already running as admin? Then the offer is not merely redundant, it is
                 // wrong - pressing it would restart the app to grant rights it already has.
@@ -2912,6 +2903,7 @@ namespace PowerDial
             _quitting = true;
             if (_wake != null) { try { _wake.Set(); } catch (Exception) { } }
             History.SaveOffenders();
+            ReleaseChargeLimit();
             if (_tray != null) _tray.Visible = false;
 
             // ours to release: three timers, the WMI searchers and the named event
@@ -3276,10 +3268,8 @@ namespace PowerDial
             {
                 // Plenty of machines simply do not report this. Saying so is better than a
                 // blank card, and much better than a made-up percentage.
-                _healthPct.Text = "Not reported by this PC";
-                _healthNote.Text = "Windows exposes a full-charge capacity for most laptop batteries, " +
-                                   "but not all of them. Everything else in this app still works - " +
-                                   "it just cannot say how much this one has aged.";
+                _healthPct.Text = "Capacity unavailable";
+                _healthNote.Text = "A full-charge reading from Windows is needed to estimate wear.";
                 _barHealth.Invalidate();
                 return;
             }
@@ -3287,8 +3277,8 @@ namespace PowerDial
             double usable = _bat.FullChargeMwh.Value / 1000.0;
             double design = BatteryMonitor.OriginalDesignMwh / 1000.0;
             double lost = Math.Max(0, design - usable);
-            _barHealth.Segments.Add(new Segment { Name = "still holds", Value = usable, Color = Theme.Save });
-            _barHealth.Segments.Add(new Segment { Name = "lost to ageing", Value = lost, Color = Theme.Spend });
+            _barHealth.Segments.Add(new Segment { Name = "Available", Value = usable, Color = Theme.Save });
+            _barHealth.Segments.Add(new Segment { Name = "Lost", Value = lost, Color = Theme.Spend });
 
             if (design > 0.01)
             {
@@ -3302,14 +3292,10 @@ namespace PowerDial
                 _healthPct.ForeColor = Theme.Text;
             }
 
-            string note = usable.ToString("0.0") + " Wh of the " + design.ToString("0.0") +
-                          " Wh it shipped with.";
-            if (_bat.Watts.HasValue && _bat.Watts.Value > 0.1)
-                note += "  At the " + _bat.Watts.Value.ToString("0.00") + " W measured just now, that " +
-                        "missing capacity is " + FmtHours(lost / _bat.Watts.Value) + " you no longer have.";
-            else
-                note += "  Use the laptop on battery for a minute and this will also say how much " +
-                        "running time that works out to.";
+            string note = design > 0 ? $"Full charge {usable:0.0} Wh   ·   Original {design:0.0} Wh"
+                                     : "Original capacity unavailable. Windows reports the current full-charge estimate.";
+            if (lost > 0 && _bat.Watts.HasValue && _bat.Watts.Value > 0.1)
+                note += $"\nEstimated runtime lost at {_bat.Watts.Value:0.0} W: {FmtHours(lost / _bat.Watts.Value)}.";
             _healthNote.Text = note;
 
             _barHealth.Invalidate();
@@ -4159,6 +4145,13 @@ namespace PowerDial
             }
 
             // ---- then everything this app knows ----
+            if (!ReleaseChargeLimit())
+            {
+                _poll.Start();
+                _tick.Start();
+                ShowLog();
+                return;
+            }
             History.DeleteAll();
             Config.Reset();
             Baseline.Delete();

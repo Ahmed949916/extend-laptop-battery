@@ -13,6 +13,25 @@ sealed partial class SelfTest
 
     static void BatteryCareChecks()
     {
+        bool hold = false;
+        foreach (var sample in new[] { (50, false), (69, false), (70, true), (85, true),
+            (69, true), (41, true), (40, false), (39, false), (41, false) })
+        {
+            hold = OmenChargeControl.ShouldHold(hold, sample.Item1, 40, 70);
+            Check("OMEN charge hold at " + sample.Item1, hold == sample.Item2);
+        }
+        Check("custom charge limits use both selected thresholds",
+            !OmenChargeControl.ShouldHold(false, 70, 55, 85) && OmenChargeControl.ShouldHold(false, 85, 55, 85)
+            && OmenChargeControl.ShouldHold(true, 56, 55, 85) && !OmenChargeControl.ShouldHold(true, 55, 55, 85));
+        using (var card = new ChargeLimitCard(new Config { ResumeChargePercent = 55, PauseChargePercent = 85 }))
+        {
+            Check("charge sliders load saved values", card.Resume.Value == 55 && card.Pause.Value == 85);
+            card.Resume.Value = 100;
+            Check("resume slider stays below pause", card.Resume.Value == 84 && card.Pause.Value == 85);
+            card.Resume.Value = 10;
+            card.Pause.Value = 1;
+            Check("pause slider stays above resume", card.Resume.Value == 10 && card.Pause.Value == 11);
+        }
         List<HistPoint> points = new List<HistPoint> { CarePoint(1000), CarePoint(1060), CarePoint(1120) };
         ChargeExposure e = BatteryCare.Exposure(points, 1120);
         Check("charge exposure uses observed intervals, not sample count", e.ObservedSeconds == 120 && e.HighSeconds == 120 && e.PluggedHighSeconds == 120);

@@ -104,11 +104,11 @@ namespace PowerDial
             switch (choice)
             {
                 case 1:
-                    return "Travel: charge to 100% when you need the runtime, preferably near departure. Return to your usual charging limit afterwards. Recharge before running very low; repeated full discharges are not a battery-health treatment.";
+                    return "Charge to 100% near departure when you need the extra runtime. Return to your usual charge limit afterwards.";
                 case 2:
-                    return "Storage: aim for roughly 40-60% before shutting down for an extended period. Store in a cool, dry place and check charge periodically. Do not run a heavy workload just to drain to a target.";
+                    return "Aim for about 40–60% before shutting down for extended storage. Choose a cool, dry place and check the charge periodically.";
                 default:
-                    return "Desk use: enable Smart charging or a charge limit in your manufacturer's app or BIOS if supported; around 80% is a practical daily target. Stay plugged in with that limit rather than deliberately cycling the battery. Support varies by model.";
+                    return "For long days plugged in, use a charge limit or Smart charging if available. You can stay on AC with the limit enabled. Keep the vents clear to avoid heat buildup.";
             }
         }
 

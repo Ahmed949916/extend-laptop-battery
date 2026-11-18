@@ -64,7 +64,7 @@ windows replace the sidebar with a page selector; dense cards retain a readable 
 width and remain reachable through horizontal scrolling. The main window supports widths
 down to 480 pixels and the app review down to 560 pixels (before display scaling).
 
-**Battery health** now includes four care features:
+**Battery health** includes these care features:
 
 - **Charge exposure:** hours observed above 80%, plugged in above 80%, and below 20%
   during the last seven days. Both ends of an interval must qualify; threshold crossings
@@ -76,8 +76,16 @@ down to 480 pixels and the app review down to 560 pixels (before display scaling
   changes restart the comparison; recalibration, charge limits and an undetected battery
   replacement can still affect it. This is an observed change, not a degradation forecast.
 - **Care plans:** desk, travel and storage advice, plus links to Microsoft's battery-care
-  and Smart charging guidance. Choosing a plan changes advice only. Charging limits depend
-  on the manufacturer's hardware and software; PowerDial does not enforce them.
+  and Smart charging guidance. Choosing a plan changes advice only.
+- **OMEN charge limit** is available on HP board 8901 with BIOS F.24. Run PowerDial
+  as administrator and choose **Enable charge limit** at the bottom of Overview or the top of Battery health.
+  Use the **Resume at** and **Pause at** sliders and choose **Apply limits** to save them.
+  On AC, PowerDial pauses at the upper limit and releases its pause at the lower limit.
+  The defaults are 40% to resume and 70% to pause.
+  While awake it checks every 15 seconds, including in the tray. Windows keeps its
+  configured AC and battery settings. Disabling the limit or quitting on AC returns
+  a PowerDial-owned pause to automatic charging. After an interrupted exit, reopen
+  PowerDial as administrator on AC to resume control. Sleep and shutdown suspend polling.
 - **Health CSV export:** saves retained charge, AC state and capacity readings using UTC
   timestamps and a locale-independent format. It excludes process names. History retains
   three calendar months; comparisons use at most 90 days. Capacity recording starts with
